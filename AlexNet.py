@@ -21,10 +21,9 @@ class AlexNetModel:
                 image = load_img(image_path, target_size=target_size, color_mode='grayscale' if is_mask else 'rgb')
                 image = img_to_array(image)
                 if is_mask:
-                    image = image / 255.0  # Normalize mask images
+                    image = image / 255.0 
                 else:
-                    # Generic preprocess for non-mask images
-                    image = preprocess_input(image, mode='caffe')  # 'caffe' mode for AlexNet-like preprocessing
+                    image = preprocess_input(image, mode='caffe') 
                 images.append(image)
         return np.array(images)
 
