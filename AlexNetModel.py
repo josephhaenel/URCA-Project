@@ -3,15 +3,16 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from F1Score import F1Score
-from tensorflow.keras.layers import Resizing, Input, Conv2D, UpSampling2D
-from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, UpSampling2D, Resizing, Input
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.applications.imagenet_utils import preprocess_input
+from tensorflow.keras.callbacks import Callback
 
-class InceptionResNetV2Model:
+class AlexNetModel:
     def __init__(self, rgb_dir: str, disease_segmented_dir: str, leaf_segmented_dir: str) -> None:
         """
-        Initialize the InceptionResNetV2Model with directories for RGB, disease-segmented,
+        Initialize the AlexNetModel with directories for RGB, disease-segmented,
         and leaf-segmented images.
 
         Parameters:
@@ -24,50 +25,55 @@ class InceptionResNetV2Model:
         self.leaf_segmented_dir = leaf_segmented_dir
         self.model = self._build_model()
 
-    @staticmethod
-    def load_images(image_dirs: list, is_mask: bool = False, target_size: tuple = (299, 299)) -> np.ndarray:
+    def load_images(self, base_dir: str, subfolders: list, is_mask: bool = False, target_size: tuple = (227, 227)) -> np.ndarray:
         """
-        Load images from the given directories, preprocess them and return as numpy array.
+        Load and preprocess images from specified subdirectories.
 
         Parameters:
-        - image_dirs (list): List of directories to load images from.
-        - is_mask (bool): Whether the images are masks. Defaults to False.
-        - target_size (tuple): The target size for resizing the images. Defaults to (299, 299).
+        - base_dir (str): Base directory containing image subfolders.
+        - subfolders (list): List of subfolder names within the base directory.
+        - is_mask (bool): Flag indicating if the images are masks. Defaults to False.
+        - target_size (tuple): Target size for resizing the images. Defaults to (227, 227).
 
         Returns:
         - np.ndarray: Array of preprocessed image data.
         """
         images = []
-        for image_dir in image_dirs:
+        for subfolder in subfolders:
+            image_dir = os.path.join(base_dir, subfolder)
             for filename in os.listdir(image_dir):
                 if filename.endswith('.png'):
                     image_path = os.path.join(image_dir, filename)
                     image = load_img(image_path, target_size=target_size, color_mode='grayscale' if is_mask else 'rgb')
                     image = img_to_array(image)
-                    image = image / 255.0 if is_mask else preprocess_input(image)  # Normalize mask or preprocess image
+                    image = image / 255.0 if is_mask else preprocess_input(image, mode='caffe')
                     images.append(image)
         return np.array(images)
 
     def _build_model(self) -> Model:
         """
-        Builds and returns the modified InceptionResNetV2 model.
+        Constructs and returns the AlexNet-like model modified for image segmentation.
 
         Returns:
         - Model: The constructed TensorFlow Keras model.
         """
-        base_model = InceptionResNetV2(weights='imagenet', include_top=False, input_tensor=Input(shape=(299, 299, 3)))
-
-        x = base_model.output
-        x = Conv2D(512, (3, 3), activation='relu', padding='same')(x)
+        input_tensor = Input(shape=(227, 227, 3))
+        x = Conv2D(96, (11, 11), strides=4, activation='relu')(input_tensor)
+        x = MaxPooling2D((3, 3), strides=2)(x)
+        x = Conv2D(256, (5, 5), padding='same', activation='relu')(x)
+        x = MaxPooling2D((3, 3), strides=2)(x)
+        x = Conv2D(384, (3, 3), padding='same', activation='relu')(x)
+        x = Conv2D(384, (3, 3), padding='same', activation='relu')(x)
+        x = Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = MaxPooling2D((3, 3), strides=2)(x)
         x = UpSampling2D(size=(2, 2))(x)
-        x = Conv2D(256, (3, 3), activation='relu', padding='same')(x)
+        x = Conv2D(128, (3, 3), activation='relu', padding='same')(x)
         x = UpSampling2D(size=(2, 2))(x)
         x = Resizing(256, 256)(x)
-
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
         leaf_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='leaf_segmentation')(x)
 
-        model = Model(inputs=base_model.input, outputs=[disease_segmentation, leaf_segmentation])
+        model = Model(inputs=input_tensor, outputs=[disease_segmentation, leaf_segmentation])
         return model
 
     def _create_directory(self, path):
@@ -79,7 +85,7 @@ class InceptionResNetV2Model:
 
     def _save_plots(self, history, output_dir):
         """
-        Save plots for training metrics.
+        Save plots for training and validation metrics.
         """
         # Loss Plot
         plt.figure(figsize=(12, 6))
@@ -102,19 +108,29 @@ class InceptionResNetV2Model:
 
         plt.savefig(os.path.join(output_dir, 'training_plots.png'))
 
-    def compile_and_train(self, epochs: int, batch_size: int, output_dir: str) -> tf.keras.callbacks.History:
+    def _save_segmentation_images(self, images, predictions, output_dir, epoch):
+        """
+        Save generated segmentation images.
+        """
+        for i in range(len(images)):
+            plt.imsave(os.path.join(output_dir, f'epoch_{epoch}_image_{i}.png'), predictions[i], cmap='gray')
+
+    def compile_and_train(self, epochs: int, batch_size: int, output_dir: str):
         """
         Compiles and trains the model, and saves outputs to the specified directory.
         """
         # Directory setup
         self._create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
+        images_dir = os.path.join(output_dir, 'images')
         self._create_directory(plots_dir)
+        self._create_directory(images_dir)
 
         # Load and preprocess data
-        images = self.load_images([self.rgb_dir])
-        disease_labels = self.load_images([self.disease_segmented_dir], is_mask=True, target_size=(256, 256))
-        leaf_segmentation_masks = self.load_images([self.leaf_segmented_dir], is_mask=True, target_size=(256, 256))
+        subfolders = os.listdir(self.rgb_dir)
+        images = self.load_images(self.rgb_dir, subfolders)
+        disease_labels = self.load_images(self.disease_segmented_dir, subfolders, is_mask=True, target_size=(256, 256))
+        leaf_segmentation_masks = self.load_images(self.leaf_segmented_dir, subfolders, is_mask=True, target_size=(256, 256))
 
         # Model compilation
         f1_score_metric = F1Score()
@@ -133,8 +149,8 @@ class InceptionResNetV2Model:
         # Saving training metrics plots
         self._save_plots(history, plots_dir)
 
-        return history
+        # Generating and saving segmentation images (post-training)
+        predictions = self.model.predict(images)
+        self._save_segmentation_images(images, predictions, images_dir, epochs)
 
-# Usage
-# model = InceptionResNetV2Model(rgb_dir, disease_segmented_dir, leaf_segmented_dir)
-# history = model.compile_and_train(epochs=10, batch_size=32, output_dir='outputs/dir/nameofsubfolder')
+        return history
