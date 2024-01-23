@@ -56,7 +56,7 @@ class ImageKMeansSegmenter:
             labels = self.apply_kmeans(original_image)
             
             # Optional if you want top see what the segmentation looks like
-            # self.visualize_segmentation(original_image, labels)
+            self.visualize_segmentation(original_image, labels)
 
             ground_truth = self.convert_to_binary_mask(disease_image).flatten()
             predicted = labels.flatten()
