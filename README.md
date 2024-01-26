@@ -7,3 +7,5 @@
 ## Machine Learning Algorithms
 1. Random Forest
 2. K-Means
+
+*Last Updated 1/26 - Current WIP*
