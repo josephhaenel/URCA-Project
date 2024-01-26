@@ -8,4 +8,4 @@
 1. Random Forest
 2. K-Means
 
-*Last Updated 1/26 - Current WIP*
+*Last Updated 1/26/2024 - Current WIP*
