@@ -5,10 +5,11 @@ from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampl
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications.inception_resnet_v2 import preprocess_input
-from F1Score import F1Score
+from utils.F1Score import F1Score
 from utils.GraphPlotter import save_plots, save_history_to_txt
 from tensorflow.keras.metrics import Recall
 from tensorflow.keras.losses import BinaryCrossentropy
+from utils.IoUMetric import IoUMetric
 
 class CalculateIOU:
     @staticmethod
@@ -165,7 +166,7 @@ class AlexNetModel:
         combined_inputs, disease_labels = self.load_images_and_masks(paired_image_paths, target_size=(227, 227))
 
         # Model compilation
-        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall')]
+        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
         self.model.compile(optimizer='adam',
                         loss={'disease_segmentation': BinaryCrossentropy()},
                         metrics={'disease_segmentation': disease_metrics}

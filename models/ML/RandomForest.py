@@ -48,9 +48,7 @@ class ImageRandomForestSegmenter:
         disease_folder = os.path.join(folder_path, 'segmented_disease')
         metrics = {'accuracy': [], 'recall': [], 'precision': []}
 
-        # You'll need to split your data into a training set and a testing/validation set
-        # Train the model on the training set
-        # For demonstration, let's assume you have training_data and training_labels
+        # TODO: Split data into training and validation set
         # self.train_model(training_data, training_labels)
 
         for image_name in os.listdir(original_folder):
@@ -62,15 +60,13 @@ class ImageRandomForestSegmenter:
 
             labels = self.predict(original_image)
 
-            # Optional visualization
-            # self.visualize_segmentation(original_image, labels)
+            # self.visualize_segmentation(original_image, labels) optional
 
             ground_truth = self.convert_to_binary_mask(disease_image).flatten()
             predicted = labels.flatten()
 
-            # ... same accuracy, recall, precision calculation as before ...
+            # Not done yet
 
         return metrics
 
-# The rest of the main code remains similar
-# Remember, you'll need to handle the splitting of your dataset into training and test sets
+# TODO: need to handle the splitting of dataset into training and test sets

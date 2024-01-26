@@ -5,7 +5,7 @@ from models.DLModels.InceptionResNetV2Model import InceptionResNetV2Model
 from models.DLModels.AlexNetModel import AlexNetModel
 from models.DLModels.ResNet50Model import ResNet50Model
 
-def run_all_models(base_dir, base_rgb_dir, base_disease_dir, base_leaf_dir):
+def run_all_models(base_dir, base_rgb_dir, base_disease_dir, base_leaf_dir): # Why did this save into outputshighlight_maize??????
     # Base output directory
     last_part = os.path.basename(base_dir)
     if not os.path.exists('outputs' + last_part):

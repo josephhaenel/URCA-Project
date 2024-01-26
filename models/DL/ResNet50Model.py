@@ -8,7 +8,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from F1Score import F1Score
+from utils.F1Score import F1Score
 from utils.GraphPlotter import save_plots, save_history_to_txt
 from tensorflow.keras.metrics import Recall
 
