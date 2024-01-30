@@ -6,10 +6,11 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications.inception_resnet_v2 import preprocess_input
 from utils.F1Score import F1Score
-from utils.GraphPlotter import save_plots, save_history_to_txt
+from utils.GraphPlotter import save_history_to_txt
 from tensorflow.keras.metrics import Recall
 from tensorflow.keras.losses import BinaryCrossentropy
 from utils.IoUMetric import IoUMetric
+from tensorflow.keras.optimizers import Adam
 
 class CalculateIOU:
     @staticmethod
@@ -60,7 +61,7 @@ class AlexNetModel:
             disease_dir = os.path.join(base_disease_dir, disease_folder)
             leaf_dir = os.path.join(base_leaf_dir, disease_folder)
 
-            # Ensuring directories are valid
+            # Check if directories are valid
             if not os.path.isdir(rgb_dir) or not os.path.isdir(disease_dir) or not os.path.isdir(leaf_dir):
                 print(f"One of the directories is invalid: {rgb_dir}, {disease_dir}, {leaf_dir}")
                 continue
@@ -70,9 +71,14 @@ class AlexNetModel:
             leaf_files = {f for f in os.listdir(leaf_dir) if f.endswith('.png')}
 
             common_files = rgb_files.intersection(disease_files, leaf_files)
-            paired_images.extend([(os.path.join(rgb_dir, f), os.path.join(disease_dir, f), os.path.join(leaf_dir, f)) for f in common_files])
+            print(f"Found {len(common_files)} common files in folder {disease_folder}")
+
+            for f in common_files:
+                paired_images.append((os.path.join(rgb_dir, f), os.path.join(disease_dir, f), os.path.join(leaf_dir, f)))
+                print(f"Paired: {os.path.join(rgb_dir, f)}, {os.path.join(disease_dir, f)}, {os.path.join(leaf_dir, f)}")
 
         return paired_images
+
 
     def load_images_and_masks(self, paired_image_paths, target_size=(227, 227)):
         combined_images = []
@@ -95,6 +101,8 @@ class AlexNetModel:
                 disease_masks.append(disease_mask / 255.0)
             else:
                 print(f"Image not found: {rgb_path}, {disease_path}, {leaf_path}")
+                print(f"Total loaded images: {len(combined_images)}")
+            print(f"Total loaded masks: {len(disease_masks)}")
         return np.array(combined_images), np.array(disease_masks)
     
     def load_images(self, image_paths, is_mask: bool = False, target_size: tuple = (299, 299)) -> np.ndarray:
@@ -167,7 +175,7 @@ class AlexNetModel:
 
         # Model compilation
         disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
-        self.model.compile(optimizer='adam',
+        self.model.compile(optimizer=Adam(learning_rate=0.0000005),
                         loss={'disease_segmentation': BinaryCrossentropy()},
                         metrics={'disease_segmentation': disease_metrics}
                         )
@@ -177,10 +185,9 @@ class AlexNetModel:
                                  disease_labels,
                                  epochs=epochs,
                                  batch_size=batch_size,
-                                 validation_split=0.3)
+                                 validation_split=0.5)
 
         # Save training metrics and history
-        save_plots(history, plots_dir)
         save_history_to_txt(history, output_dir)
         predictions = self.model.predict(combined_inputs)
         iou_score = CalculateIOU.calculate_iou(disease_labels, predictions[0])

@@ -1,0 +1,2 @@
+validation_split=0.7
+learning_rate=0.001

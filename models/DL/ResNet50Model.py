@@ -11,6 +11,7 @@ from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils.F1Score import F1Score
 from utils.GraphPlotter import save_plots, save_history_to_txt
 from tensorflow.keras.metrics import Recall
+from utils.IoUMetric import IoUMetric
 
 # Suppressing TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -124,7 +125,7 @@ class ResNet50Model:
         if not os.path.exists(path):
             os.makedirs(path)
 
-    def compile_and_train(self, epochs, batch_size, output_dir, validation_split = 0.3):
+    def compile_and_train(self, epochs, batch_size, output_dir, validation_split = 0.5):
         # Directory setup
         self._create_directory(output_dir)
 
@@ -143,11 +144,11 @@ class ResNet50Model:
         print(f"Validation dataset size: {validation_size}")
 
         # Model compilation
-        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall')]
+        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
         leaf_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall')]
 
         self.model.compile(
-            optimizer=Adam(learning_rate=0.000001),
+            optimizer=Adam(learning_rate=0.0000005),
             loss={'disease_segmentation': BinaryCrossentropy(), 'leaf_segmentation': BinaryCrossentropy()},
             metrics={'disease_segmentation': disease_metrics, 'leaf_segmentation': leaf_metrics}
         )
@@ -168,7 +169,6 @@ class ResNet50Model:
         print(f"Validation IoU for disease segmentation: {iou_score.numpy()}")
 
         # Save training metrics and history
-        save_plots(history, output_dir)
         save_history_to_txt(history, output_dir)
 
         return history

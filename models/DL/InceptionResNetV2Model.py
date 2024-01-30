@@ -6,9 +6,11 @@ from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2,
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils.F1Score import F1Score
-from utils.GraphPlotter import save_plots, save_history_to_txt
+from tensorflow.keras.optimizers import Adam
+from utils.GraphPlotter import save_history_to_txt
 from tensorflow.keras.metrics import Recall
 from tensorflow.keras.losses import BinaryCrossentropy
+from utils.IoUMetric import IoUMetric
 
 # Suppressing TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -168,8 +170,8 @@ class InceptionResNetV2Model:
         disease_labels = self.load_images([d[2] for d in paired_image_paths], is_mask=True, target_size=(256, 256))
 
         # Model compilation
-        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall')]
-        self.model.compile(optimizer='adam', 
+        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
+        self.model.compile(optimizer=Adam(learning_rate=0.0000005), 
                         loss=BinaryCrossentropy(),
                         metrics=disease_metrics)
 
@@ -179,10 +181,9 @@ class InceptionResNetV2Model:
             disease_labels, 
             epochs=epochs, 
             batch_size=batch_size, 
-            validation_split=0.3)
+            validation_split=0.5)
 
         # Saving training metrics plots
-        save_plots(history, plots_dir)
         save_history_to_txt(history, output_dir)
         predictions = self.model.predict(combined_inputs)
         iou_score = CalculateIOU.calculate_iou(disease_labels, predictions)
