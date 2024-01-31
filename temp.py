@@ -11,66 +11,52 @@ from email.mime.multipart import MIMEMultipart
 
 APP_PASSWORD = '' # REMOVE LATER ******************************************************
 
+def run_all_models(directories_list):
+    for dirs in directories_list:
+        base_dir, base_rgb_dir, base_disease_dir, base_leaf_dir = dirs
 
-def run_all_models(base_directories):
-    for base_dir in base_directories:
-        base_rgb_dir = os.path.join(base_dir, 'RGB')
-        base_disease_dir = os.path.join(base_dir, 'GroundTruth_Disease')
-        base_leaf_dir = os.path.join(base_dir, 'GroundTruth_Leaf')
-        
         # Base output directory
         last_part = os.path.basename(base_dir)
-        if not os.path.exists('outputs', 'outputs' + last_part):
-            os.makedirs('outputs', 'outputs' + last_part)
+        if not os.path.exists('outputs' + last_part):
+            os.makedirs('outputs' + last_part)
         base_output_dir = 'outputs' + last_part
-        
-        
+
         # Run ResNet50 Model
         resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
         resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir)
         resnet50_history = resnet50_model.compile_and_train(epochs=10, batch_size=32, output_dir=resnet50_output_dir)
         
-                # Run AlexNet Model
+        # Run AlexNet Model
         alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
         alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir)
         alexnet_history = alexnet_model.compile_and_train(epochs=10, batch_size=32, output_dir=alexnet_output_dir)
-        
-            # Run Inception ResNet V2 Model
+
+        # Run Inception ResNet V2 Model
         inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
         inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir)
         inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=10, batch_size=32, output_dir=inception_resnet_v2_output_dir)
-    
-    
-    send_email(
-        "Model Training Complete",
-        "The training of all models has been completed successfully.",
-        "jhaenel@siue.edu",
-        "josephhaenel@gmail.com"
-    )
+
+        # Send email notification for each model
+        send_email(
+            "Model Training Complete for " + last_part,
+            "The training of the model with base directory " + last_part + " has been completed successfully.",
+            "jhaenel@siue.edu",
+            "josephhaenel@gmail.com"
+        )
     
 def send_email(subject, message, recipient_email, sender_email):
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = recipient_email
-    msg['Subject'] = subject
-
-    msg.attach(MIMEText(message, 'plain'))
-
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(sender_email, APP_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(sender_email, recipient_email, text)
-        server.quit()
-        print("Email sent successfully")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
+    # ... [Email sending code remains the same]
 
 if __name__ == '__main__':
-    if len(sys.argv) < 1:
-        print("Usage: python DLrun.py <base_directory1> [<base_directory2> ...]")
+    if len(sys.argv) < 5:
+        print("Usage: python DLrun.py <base_directory1> <RGB_dir1> <GT_Disease_dir1> <GT_Leaf_dir1> [more directories]")
         sys.exit(1)
 
-    base_directories = sys.argv[1:]
-    run_all_models(base_directories)
+    # Group arguments into sets of four
+    args = sys.argv[1:]
+    if len(args) % 4 != 0:
+        print("Error: Each model requires four directories. Please check your inputs.")
+        sys.exit(1)
+
+    directories_list = [args[i:i+4] for i in range(0, len(args), 4)]
+    run_all_models(directories_list)

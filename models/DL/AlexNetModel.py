@@ -5,39 +5,24 @@ from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampl
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications.inception_resnet_v2 import preprocess_input
-from utils.F1Score import F1Score
-from utils.GraphPlotter import save_history_to_txt
 from tensorflow.keras.metrics import Recall
 from tensorflow.keras.losses import BinaryCrossentropy
-from utils.IoUMetric import IoUMetric
 from tensorflow.keras.optimizers import Adam
-
-class CalculateIOU:
-    @staticmethod
-    def calculate_iou(y_true, y_pred):
-        y_true_float = tf.cast(y_true, tf.float32)
-        y_pred_float = tf.cast(y_pred, tf.float32)
-
-        y_pred_thresholded = tf.cast(tf.greater(y_pred_float, 0.5), tf.float32)
-
-        intersection = tf.reduce_sum(y_true_float * y_pred_thresholded)
-        union = tf.reduce_sum(y_true_float) + tf.reduce_sum(y_pred_thresholded) - intersection
-
-        # Compute IoU
-        iou_score = intersection / union
-        return iou_score
-
-
+from utils.F1Score import F1Score
+from utils.GraphPlotter import save_history_to_txt
+from utils.IoUMetric import IoUMetric, IoULogger
 
 class AlexNetModel:
     """
     A class to create and train an AlexNet-based model for image segmentation.
 
     Attributes:
-        rgb_dirs (str): Directory path for RGB images.
-        disease_segmented_dirs (str): Directory path for disease segmented images.
-        leaf_segmented_dirs (str): Directory path for leaf segmented images.
+        rgb_dirs (list[str]): Directory paths for RGB images.
+        disease_segmented_dirs (list[str]): Directory paths for disease segmented images.
+        leaf_segmented_dirs (list[str]): Directory paths for leaf segmented images.
         model (tf.keras.Model): The AlexNet-based segmentation model.
+        learning_rate (float): Learning rate for the model training.
+        val_split (float): Validation split for the model training.
 
     Methods:
         pair_images_by_filename: Pairs images by filenames from given directories.
@@ -48,13 +33,27 @@ class AlexNetModel:
         compile_and_train: Compiles and trains the model.
     """
 
-    def __init__(self, rgb_dirs, disease_segmented_dirs, leaf_segmented_dirs):
+    def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str],
+                 learning_rate: float, val_split: float) -> None:
         self.rgb_dirs = rgb_dirs
         self.disease_segmented_dirs = disease_segmented_dirs
         self.leaf_segmented_dirs = leaf_segmented_dirs
+        self.learning_rate = learning_rate
+        self.val_split = val_split
         self.model = self._build_model()
         
-    def pair_images_by_filename(self, base_rgb_dir, base_disease_dir, base_leaf_dir):
+    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str]]:
+        """
+        Pairs images by filenames from given directories.
+
+        Parameters:
+            base_rgb_dir (str): Base directory path for RGB images.
+            base_disease_dir (str): Base directory path for disease segmented images.
+            base_leaf_dir (str): Base directory path for leaf segmented images.
+
+        Returns:
+            list[tuple[str, str, str]]: List of tuples containing paths of paired RGB, disease, and leaf images.
+        """
         paired_images = []
         for disease_folder in os.listdir(base_rgb_dir):
             rgb_dir = os.path.join(base_rgb_dir, disease_folder)
@@ -80,7 +79,17 @@ class AlexNetModel:
         return paired_images
 
 
-    def load_images_and_masks(self, paired_image_paths, target_size=(227, 227)):
+    def load_images_and_masks(self, paired_image_paths: list[tuple[str, str, str]], target_size: tuple[int, int] = (227, 227)) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Loads images and masks for training from the paired image paths.
+
+        Parameters:
+            paired_image_paths (list[tuple[str, str, str]]): List of tuples containing paths of paired images.
+            target_size (tuple[int, int]): Target size for resizing the images.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: Tuple of numpy arrays for combined images and disease masks.
+        """
         combined_images = []
         disease_masks = []
         for rgb_path, disease_path, leaf_path in paired_image_paths:
@@ -105,7 +114,18 @@ class AlexNetModel:
             print(f"Total loaded masks: {len(disease_masks)}")
         return np.array(combined_images), np.array(disease_masks)
     
-    def load_images(self, image_paths, is_mask: bool = False, target_size: tuple = (299, 299)) -> np.ndarray:
+    def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
+        """
+        Loads images from given paths.
+
+        Parameters:
+            image_paths (list[str]): List of image file paths.
+            is_mask (bool): Specifies whether the images are masks.
+            target_size (tuple[int, int]): Target size for resizing the images.
+
+        Returns:
+            np.ndarray: Numpy array of loaded and preprocessed images.
+        """
         images = []
         for image_path in image_paths:
             if os.path.exists(image_path) and image_path.endswith('.png'):
@@ -154,14 +174,28 @@ class AlexNetModel:
 
         return Model(inputs=input_tensor, outputs=disease_segmentation)
 
-    def _create_directory(self, path):
+    def _create_directory(self, path: str) -> None:
         """
-        Create a directory if it does not exist.
+        Creates a directory if it does not exist.
+
+        Parameters:
+            path (str): The path of the directory to be created.
         """
         if not os.path.exists(path):
             os.makedirs(path)
 
-    def compile_and_train(self, epochs, batch_size, output_dir):
+    def compile_and_train(self, epochs: int, batch_size: int, output_dir: str) -> tf.keras.callbacks.History:
+        """
+        Compiles and trains the model.
+
+        Parameters:
+            epochs (int): Number of epochs for training.
+            batch_size (int): Batch size for training.
+            output_dir (str): Output directory to save training artifacts.
+
+        Returns:
+            tf.keras.callbacks.History: History object containing training metrics.
+        """
         # Directory setup
         self._create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
@@ -174,23 +208,23 @@ class AlexNetModel:
         combined_inputs, disease_labels = self.load_images_and_masks(paired_image_paths, target_size=(227, 227))
 
         # Model compilation
-        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
-        self.model.compile(optimizer=Adam(learning_rate=0.0000005),
-                        loss={'disease_segmentation': BinaryCrossentropy()},
-                        metrics={'disease_segmentation': disease_metrics}
-                        )
+        disease_metrics = ['accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
+        self.model.compile(optimizer=Adam(learning_rate=self.learning_rate),
+                           loss={'disease_segmentation': BinaryCrossentropy()},
+                           metrics={'disease_segmentation': disease_metrics}
+                           )
+        
+        iou_logger = IoULogger(output_dir)
 
         # Model training
         history = self.model.fit(combined_inputs, 
                                  disease_labels,
                                  epochs=epochs,
                                  batch_size=batch_size,
-                                 validation_split=0.5)
+                                 validation_split=self.val_split,
+                                 callbacks=[iou_logger])
 
         # Save training metrics and history
         save_history_to_txt(history, output_dir)
-        predictions = self.model.predict(combined_inputs)
-        iou_score = CalculateIOU.calculate_iou(disease_labels, predictions[0])
-        print(f"Validation IoU for disease segmentation: {iou_score.numpy()}")
 
         return history

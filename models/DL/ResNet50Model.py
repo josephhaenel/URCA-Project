@@ -1,46 +1,62 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing
-from tensorflow.keras.layers import Concatenate, BatchNormalization, Activation
+from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, BatchNormalization, Activation
 from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils.F1Score import F1Score
-from utils.GraphPlotter import save_plots, save_history_to_txt
+from utils.IoUMetric import IoUMetric, IoULogger
+from utils.GraphPlotter import save_history_to_txt
 from tensorflow.keras.metrics import Recall
-from utils.IoUMetric import IoUMetric
 
-# Suppressing TensorFlow warnings for a cleaner output
+# Suppress TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
-class CalculateIOU:
-    @staticmethod
-    def calculate_iou(y_true, y_pred):
-        y_true_float = tf.cast(y_true, tf.float32)
-        y_pred_float = tf.cast(y_pred, tf.float32)
-
-        y_pred_thresholded = tf.cast(tf.greater(y_pred_float, 0.5), tf.float32)
-
-        intersection = tf.reduce_sum(y_true_float * y_pred_thresholded)
-        union = tf.reduce_sum(y_true_float) + tf.reduce_sum(y_pred_thresholded) - intersection
-
-        # Compute IoU
-        iou_score = intersection / union
-        return iou_score
-
-
-
 class ResNet50Model:
-    def __init__(self, rgb_dirs, disease_segmented_dirs, leaf_segmented_dirs):
+    """
+    A class for creating and training a ResNet50-based model for image segmentation.
+
+    Attributes:
+        rgb_dirs (list[str]): Directory paths for RGB images.
+        disease_segmented_dirs (list[str]): Directory paths for disease-segmented images.
+        leaf_segmented_dirs (list[str]): Directory paths for leaf-segmented images.
+        learning_rate (float): Learning rate for the model training.
+        val_split (float): Validation split for the model training.
+        model (Model): The TensorFlow Keras model.
+
+    Methods:
+        load_images_and_masks: Loads and processes images and masks.
+        pair_images_by_filename: Pairs images by filename from given directories.
+        load_images: Loads and preprocesses images.
+        _build_model: Constructs the ResNet50-based model.
+        _create_directory: Ensures a directory exists.
+        compile_and_train: Compiles and trains the model.
+    """
+
+    def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], 
+                 learning_rate: float, val_split: float) -> None:
         self.rgb_dirs = rgb_dirs
         self.disease_segmented_dirs = disease_segmented_dirs
         self.leaf_segmented_dirs = leaf_segmented_dirs
+        self.learning_rate = learning_rate
+        self.val_split = val_split
         self.model = self._build_model()
+        
 
-    def load_images_and_masks(self, paired_image_paths, target_size=(224, 224)):
+    def load_images_and_masks(self, paired_image_paths: list[tuple[str, str, str]], target_size: tuple[int, int] = (224, 224)) -> np.ndarray:
+        """
+        Loads and processes images and masks from given file paths.
+
+        Parameters:
+            paired_image_paths (list[tuple[str, str, str]]): Paths for RGB image, leaf mask, and disease mask.
+            target_size (tuple[int, int]): Target size for resizing the images.
+
+        Returns:
+            np.ndarray: Array of preprocessed images.
+        """
         preprocessed_images = []
         for rgb_path, leaf_path, disease_path in paired_image_paths:
             if all(os.path.exists(p) and p.endswith('.png') for p in [rgb_path, leaf_path, disease_path]):
@@ -64,7 +80,19 @@ class ResNet50Model:
                 print(f"Image not found: {rgb_path}, {leaf_path}, {disease_path}")
         return np.array(preprocessed_images)
 
-    def pair_images_by_filename(self, base_rgb_dir, base_disease_dir, base_leaf_dir):
+
+    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str]]:
+        """
+        Pairs images by filename from given directories.
+
+        Parameters:
+            base_rgb_dir (str): Base directory path for RGB images.
+            base_disease_dir (str): Base directory path for disease-segmented images.
+            base_leaf_dir (str): Base directory path for leaf-segmented images.
+
+        Returns:
+            list[tuple[str, str, str]]: List of tuples containing paths of paired RGB, disease, and leaf images.
+        """
         paired_images = []
         for disease in os.listdir(base_rgb_dir):
             rgb_dir = os.path.join(base_rgb_dir, disease)
@@ -84,7 +112,18 @@ class ResNet50Model:
 
         return paired_images
     
-    def load_images(self, image_paths, is_mask: bool = False, target_size: tuple = (224, 224)) -> np.ndarray:
+    def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (224, 224)) -> np.ndarray:
+        """
+        Loads and preprocesses images.
+
+        Parameters:
+            image_paths (list[str]): List of image file paths.
+            is_mask (bool): Specifies whether the images are masks.
+            target_size (tuple[int, int]): Target size for resizing the images.
+
+        Returns:
+            np.ndarray: Numpy array of loaded and preprocessed images.
+        """
         images = []
         for image_path in image_paths:
             if os.path.exists(image_path) and image_path.endswith('.png'):
@@ -99,7 +138,13 @@ class ResNet50Model:
                 print(f"Image not found: {image_path}")
         return np.array(images)
 
-    def _build_model(self):
+    def _build_model(self) -> Model:
+        """
+        Constructs the ResNet50-based model.
+
+        Returns:
+            Model: The constructed TensorFlow Keras model.
+        """
         input_tensor = Input(shape=(224, 224, 3))
         base_model = ResNet50(weights='imagenet', include_top=False, input_tensor=input_tensor)
 
@@ -116,16 +161,32 @@ class ResNet50Model:
 
         x = Resizing(224, 224)(x)
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
-        leaf_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='leaf_segmentation')(x)
 
-        model = Model(inputs=base_model.input, outputs=[disease_segmentation, leaf_segmentation])
+        model = Model(inputs=base_model.input, outputs=disease_segmentation)
         return model
 
-    def _create_directory(self, path):
+    def _create_directory(self, path: str) -> None:
+        """
+        Ensures a directory exists. Creates one if it does not exist.
+
+        Parameters:
+            path (str): The path of the directory to be checked or created.
+        """
         if not os.path.exists(path):
             os.makedirs(path)
 
-    def compile_and_train(self, epochs, batch_size, output_dir, validation_split = 0.5):
+    def compile_and_train(self, epochs: int, batch_size: int, output_dir: str) -> tf.keras.callbacks.History:
+        """
+        Compiles and trains the model.
+
+        Parameters:
+            epochs (int): Number of epochs for training.
+            batch_size (int): Batch size for training.
+            output_dir (str): Output directory to save training artifacts.
+
+        Returns:
+            tf.keras.callbacks.History: History object containing training metrics.
+        """
         # Directory setup
         self._create_directory(output_dir)
 
@@ -136,7 +197,7 @@ class ResNet50Model:
         leaf_labels = self.load_images([d[1] for d in paired_image_paths], is_mask=True, target_size=(256, 256))
         
         total_size = len(combined_inputs)
-        training_size = int(total_size * (1 - validation_split))
+        training_size = int(total_size * (1 - self.val_split))
         validation_size = total_size - training_size
         
         print(f"Total dataset size: {total_size}")
@@ -144,32 +205,25 @@ class ResNet50Model:
         print(f"Validation dataset size: {validation_size}")
 
         # Model compilation
-        disease_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
-        leaf_metrics = [BinaryCrossentropy(), 'accuracy', F1Score(), Recall(name='recall')]
+        disease_metrics = ['accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
 
         self.model.compile(
-            optimizer=Adam(learning_rate=0.0000005),
-            loss={'disease_segmentation': BinaryCrossentropy(), 'leaf_segmentation': BinaryCrossentropy()},
-            metrics={'disease_segmentation': disease_metrics, 'leaf_segmentation': leaf_metrics}
-        )
+            optimizer=Adam(learning_rate=self.learning_rate),
+            loss=BinaryCrossentropy(),
+            metrics=disease_metrics)
+        
+        iou_logger = IoULogger(output_dir)
 
         # Model training
         history = self.model.fit(
             combined_inputs, 
-            {'disease_segmentation': disease_labels, 'leaf_segmentation': leaf_labels},
-            epochs=epochs,
-            batch_size=batch_size,
-            validation_split=validation_split
-        )
-
-        # Calculate and Print IoU Scores
-        predictions = self.model.predict(combined_inputs)
-        predictions = self.model.predict(combined_inputs)
-        iou_score = CalculateIOU.calculate_iou(disease_labels, predictions[0])
-        print(f"Validation IoU for disease segmentation: {iou_score.numpy()}")
+            disease_labels, 
+            epochs=epochs, 
+            batch_size=batch_size, 
+            validation_split=self.val_split,
+            callbacks=[iou_logger])
 
         # Save training metrics and history
         save_history_to_txt(history, output_dir)
 
         return history
-

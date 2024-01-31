@@ -1,9 +1,11 @@
 import tensorflow as tf
+import os
 
 class IoUMetric(tf.keras.metrics.Metric):
     def __init__(self, name='iou_score', **kwargs):
         super(IoUMetric, self).__init__(name=name, **kwargs)
-        self.iou = self.add_weight(name='iou', initializer='zeros')
+        self.total_iou = self.add_weight(name='total_iou', initializer='zeros')
+        self.count = self.add_weight(name='count', initializer='zeros')
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         y_true_float = tf.cast(y_true, tf.float32)
@@ -13,11 +15,26 @@ class IoUMetric(tf.keras.metrics.Metric):
         intersection = tf.reduce_sum(y_true_float * y_pred_thresholded)
         union = tf.reduce_sum(y_true_float) + tf.reduce_sum(y_pred_thresholded) - intersection
         iou_score = intersection / (union + tf.keras.backend.epsilon())
-        
-        self.iou.assign(iou_score)
+
+        self.total_iou.assign_add(iou_score)
+        self.count.assign_add(1)
 
     def result(self):
-        return self.iou
+        return self.total_iou / self.count
 
     def reset_states(self):
-        self.iou.assign(0.0)
+        self.total_iou.assign(0.0)
+        self.count.assign(0.0)
+        
+class IoULogger(tf.keras.callbacks.Callback):
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+
+    def on_epoch_end(self, epoch, logs=None):
+        with open(os.path.join(self.output_dir, 'iou_log.txt'), 'a') as file:
+            file.write(f"Epoch {epoch + 1}\n")
+            for key, value in logs.items():
+                if key == 'iou_score':
+                    file.write(f"{key}: {value}\n")
+
+
