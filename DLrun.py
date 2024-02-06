@@ -28,8 +28,8 @@ def run_all_models(base_directories):
             number += 1    
         base_output_dir = os.path.join('outputs', str(number), 'outputs' + last_part)
         
-        learning_rate = 0.0001 # 0.001, 0.0001
-        val_split = 0.7 # 0.9, 0.7, 0.5, 0.3, 0.1
+        learning_rate = 0.001 # 0.001, 0.0001
+        val_split = 0.9 # 0.9, 0.7, 0.5, 0.3, 0.1
         
         infoPath = os.path.join('outputs', str(number), 'info.txt')
             
@@ -39,9 +39,9 @@ def run_all_models(base_directories):
             
         
         # Run ResNet50 Model
-        resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
-        resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
-        resnet50_history = resnet50_model.compile_and_train(epochs=10, batch_size=32, output_dir=resnet50_output_dir)
+        # resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
+        # resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
+        # resnet50_history = resnet50_model.compile_and_train(epochs=10, batch_size=32, output_dir=resnet50_output_dir)
         
                 # Run AlexNet Model
         alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
@@ -49,9 +49,9 @@ def run_all_models(base_directories):
         alexnet_history = alexnet_model.compile_and_train(epochs=10, batch_size=32, output_dir=alexnet_output_dir)
         
             # Run Inception ResNet V2 Model
-        inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
-        inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
-        inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=10, batch_size=32, output_dir=inception_resnet_v2_output_dir)
+        # inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
+        # inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
+        # inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=10, batch_size=32, output_dir=inception_resnet_v2_output_dir)
     
     
     # send_email(

@@ -80,16 +80,6 @@ class AlexNetModel:
 
 
     def load_images_and_masks(self, paired_image_paths: list[tuple[str, str, str]], target_size: tuple[int, int] = (227, 227)) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Loads images and masks for training from the paired image paths.
-
-        Parameters:
-            paired_image_paths (list[tuple[str, str, str]]): List of tuples containing paths of paired images.
-            target_size (tuple[int, int]): Target size for resizing the images.
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: Tuple of numpy arrays for combined images and disease masks.
-        """
         combined_images = []
         disease_masks = []
         for rgb_path, disease_path, leaf_path in paired_image_paths:
@@ -102,8 +92,8 @@ class AlexNetModel:
                 leaf_mask = img_to_array(leaf_mask)
                 disease_mask = img_to_array(disease_mask)
 
-                rgb_image = preprocess_input(rgb_image)
-                leaf_mask = np.repeat(leaf_mask / 255.0, 3, axis=-1)
+                rgb_image = rgb_image / 255.0  # Rescale pixel values to [0, 1]
+                leaf_mask = np.repeat(leaf_mask / 255.0, 3, axis=-1)  # Also rescale and replicate the leaf mask
 
                 combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
                 combined_images.append(combined_image)
@@ -113,7 +103,7 @@ class AlexNetModel:
                 print(f"Total loaded images: {len(combined_images)}")
             print(f"Total loaded masks: {len(disease_masks)}")
         return np.array(combined_images), np.array(disease_masks)
-    
+
     def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
         """
         Loads images from given paths.

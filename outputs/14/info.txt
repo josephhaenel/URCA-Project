@@ -1,0 +1,2 @@
+learningRate = 1e-05
+valSplit = 0.3
