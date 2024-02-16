@@ -28,30 +28,37 @@ def run_all_models(base_directories):
             number += 1    
         base_output_dir = os.path.join('outputs', str(number), 'outputs' + last_part)
         
-        learning_rate = 0.001 # 0.001, 0.0001
-        val_split = 0.9 # 0.9, 0.7, 0.5, 0.3, 0.1
-        
         infoPath = os.path.join('outputs', str(number), 'info.txt')
-            
-        with open(infoPath, "w") as f:
-            # Write learning rate and validation split to info.txt file
-            f.write("learningRate = " + str(learning_rate) + "\n" + "valSplit = " + str(val_split))
-            
+        
+        ResNet50_learning_rate = 0.0001 # 0.001, 0.0001
+        ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
         
         # Run ResNet50 Model
-        # resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
-        # resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
-        # resnet50_history = resnet50_model.compile_and_train(epochs=10, batch_size=32, output_dir=resnet50_output_dir)
+        resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
+        resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, ResNet50_learning_rate, ResNet50_val_split, last_part)
+        resnet50_history = resnet50_model.compile_and_train(epochs=100, batch_size=32, output_dir=resnet50_output_dir)
         
-                # Run AlexNet Model
+        AlexNet_learning_rate = 0.0001 # 0.00001, 0.0000001
+        AlexNet_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
+        
+        # Run AlexNet Model
         alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
-        alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
-        alexnet_history = alexnet_model.compile_and_train(epochs=10, batch_size=32, output_dir=alexnet_output_dir)
+        alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir, AlexNet_learning_rate, AlexNet_val_split, last_part)
+        alexnet_history = alexnet_model.compile_and_train(epochs=30, batch_size=32, output_dir=alexnet_output_dir)
         
-            # Run Inception ResNet V2 Model
-        # inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
-        # inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, learning_rate, val_split)
-        # inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=10, batch_size=32, output_dir=inception_resnet_v2_output_dir)
+        InceptionResNetV2_learning_rate = 0.0001 # 0.001, 0.0001
+        InceptionResNetV2_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
+        
+        # Run Inception ResNet V2 Model
+        inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
+        inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, InceptionResNetV2_learning_rate, InceptionResNetV2_val_split, last_part)
+        inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=100, batch_size=32, output_dir=inception_resnet_v2_output_dir)
+        
+        with open(infoPath, "w") as f:
+            # Write learning rate and validation split to info.txt file
+            f.write("ResNet50 learningRate = " + str(ResNet50_learning_rate) + "\n" + "ResNet50 valSplit = " + str(ResNet50_val_split))
+            f.write("AlexNet learningRate = " + str(AlexNet_learning_rate) + "\n" + "AlexNet valSplit = " + str(AlexNet_val_split))
+            f.write("InceptionResNetV2 learningRate = " + str(InceptionResNetV2_learning_rate) + "\n" + "InceptionResNetV2 valSplit = " + str(InceptionResNetV2_val_split))
     
     
     # send_email(

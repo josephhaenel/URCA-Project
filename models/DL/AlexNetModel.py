@@ -1,121 +1,130 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Resizing, concatenate
+from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Resizing, concatenate, BatchNormalization, SpatialDropout2D, Conv2DTranspose, Dropout, LeakyReLU, GlobalAveragePooling2D, Reshape, Dense, multiply, concatenate, SeparableConv2D
+from tensorflow.keras.regularizers import l2
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications.inception_resnet_v2 import preprocess_input
 from tensorflow.keras.metrics import Recall
-from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.optimizers.schedules import ExponentialDecay
+from tensorflow.keras.utils import to_categorical
+import matplotlib.pyplot as plt
 from utils.F1Score import F1Score
 from utils.GraphPlotter import save_history_to_txt
 from utils.IoUMetric import IoUMetric, IoULogger
+from utils.LogPerClassMetrics import LogPerClassMetrics
+from utils.BinaryPerClassMetrics import BinaryPerClassMetrics
+from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
+from tensorflow.keras.callbacks import EarlyStopping, LearningRateScheduler
+
+def scheduler(epoch, lr):
+    if epoch < 10:
+        return lr
+    else:
+        return (lr * tf.math.exp(-0.1)).numpy()
+
+def dice_coefficient(y_true, y_pred):
+    smooth = 1e-6
+    y_true_f = tf.reshape(y_true, [-1])
+    y_pred_f = tf.reshape(y_pred, [-1])
+    intersection = tf.reduce_sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) + smooth)
+
+def combined_loss(y_true, y_pred):
+    bce = tf.keras.losses.BinaryCrossentropy()(y_true, y_pred)
+    dice_loss = 1 - dice_coefficient(y_true, y_pred)
+    return bce + dice_loss
+
+def preprocess_mask(mask_path, target_size):
+    # Load the mask
+    mask = img_to_array(load_img(mask_path, target_size=target_size, color_mode='grayscale'))
+    # Convert to binary format: 1 if disease is present, 0 otherwise
+    binary_mask = np.where(mask > 0, 1, 0)
+    return binary_mask[..., np.newaxis]  # Add a channel dimension
+
+def squeeze_excite_block(input, ratio=16):
+    init = input
+    channel_axis = -1
+    filters = init.shape[channel_axis]
+    se_shape = (1, 1, filters)
+
+    se = GlobalAveragePooling2D()(init)
+    se = Reshape(se_shape)(se)
+    se = Dense(filters // ratio, activation='relu', kernel_initializer='he_normal', use_bias=False)(se)
+    se = Dense(filters, activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(se)
+
+    x = multiply([init, se])
+    return x
 
 class AlexNetModel:
-    """
-    A class to create and train an AlexNet-based model for image segmentation.
-
-    Attributes:
-        rgb_dirs (list[str]): Directory paths for RGB images.
-        disease_segmented_dirs (list[str]): Directory paths for disease segmented images.
-        leaf_segmented_dirs (list[str]): Directory paths for leaf segmented images.
-        model (tf.keras.Model): The AlexNet-based segmentation model.
-        learning_rate (float): Learning rate for the model training.
-        val_split (float): Validation split for the model training.
-
-    Methods:
-        pair_images_by_filename: Pairs images by filenames from given directories.
-        load_images_and_masks: Loads images and masks for training.
-        load_images: Loads images from given paths.
-        _build_model: Builds the AlexNet-based segmentation model.
-        _create_directory: Creates a directory if it does not exist.
-        compile_and_train: Compiles and trains the model.
-    """
-
-    def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str],
-                 learning_rate: float, val_split: float) -> None:
-        self.rgb_dirs = rgb_dirs
-        self.disease_segmented_dirs = disease_segmented_dirs
-        self.leaf_segmented_dirs = leaf_segmented_dirs
+    def __init__(self, rgb_dir: str, disease_segmented_dir: str, leaf_segmented_dir: str,
+                 learning_rate: float, val_split: float, dataset_name: str) -> None:
+        self.rgb_dir = rgb_dir
+        self.disease_segmented_dir = disease_segmented_dir
+        self.leaf_segmented_dir = leaf_segmented_dir
         self.learning_rate = learning_rate
         self.val_split = val_split
+        self.dataset_name = dataset_name
+        self.num_classes = self._determine_num_classes(disease_segmented_dir)
         self.model = self._build_model()
+
+    def _determine_num_classes(self, base_dir: str) -> int:
+        """
+        Determines the number of unique classes based on the number of subdirectories
+        in a given directory. Assumes each subdirectory corresponds to a unique class.
+        """
+        return len([name for name in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, name))])
         
-    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str]]:
-        """
-        Pairs images by filenames from given directories.
+    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str):
+        paired_images_with_labels = []
+        # Loop through each disease type directory in the RGB directory
+        for disease_type in os.listdir(base_rgb_dir):
+            rgb_disease_dir = os.path.join(base_rgb_dir, disease_type)
+            disease_segmented_disease_dir = os.path.join(base_disease_dir, disease_type)
+            leaf_segmented_disease_dir = os.path.join(base_leaf_dir, disease_type)
 
-        Parameters:
-            base_rgb_dir (str): Base directory path for RGB images.
-            base_disease_dir (str): Base directory path for disease segmented images.
-            base_leaf_dir (str): Base directory path for leaf segmented images.
-
-        Returns:
-            list[tuple[str, str, str]]: List of tuples containing paths of paired RGB, disease, and leaf images.
-        """
-        paired_images = []
-        for disease_folder in os.listdir(base_rgb_dir):
-            rgb_dir = os.path.join(base_rgb_dir, disease_folder)
-            disease_dir = os.path.join(base_disease_dir, disease_folder)
-            leaf_dir = os.path.join(base_leaf_dir, disease_folder)
-
-            # Check if directories are valid
-            if not os.path.isdir(rgb_dir) or not os.path.isdir(disease_dir) or not os.path.isdir(leaf_dir):
-                print(f"One of the directories is invalid: {rgb_dir}, {disease_dir}, {leaf_dir}")
+            # Check that directories exist in all three locations
+            if not os.path.isdir(rgb_disease_dir) or not os.path.isdir(disease_segmented_disease_dir) or not os.path.isdir(leaf_segmented_disease_dir):
                 continue
 
-            rgb_files = {f for f in os.listdir(rgb_dir) if f.endswith('.png')}
-            disease_files = {f for f in os.listdir(disease_dir) if f.endswith('.png')}
-            leaf_files = {f for f in os.listdir(leaf_dir) if f.endswith('.png')}
+            for file_name in os.listdir(rgb_disease_dir):
+                rgb_path = os.path.join(rgb_disease_dir, file_name)
+                disease_path = os.path.join(disease_segmented_disease_dir, file_name)
+                leaf_path = os.path.join(leaf_segmented_disease_dir, file_name)
 
-            common_files = rgb_files.intersection(disease_files, leaf_files)
-            print(f"Found {len(common_files)} common files in folder {disease_folder}")
+                # Ensure all paths exist before adding
+                if os.path.exists(rgb_path) and os.path.exists(disease_path) and os.path.exists(leaf_path):
+                    paired_images_with_labels.append((rgb_path, disease_path, leaf_path, disease_type))
+                else:
+                    print(f"Missing image for {file_name} in {disease_type}")
+        
+        return paired_images_with_labels
 
-            for f in common_files:
-                paired_images.append((os.path.join(rgb_dir, f), os.path.join(disease_dir, f), os.path.join(leaf_dir, f)))
-                print(f"Paired: {os.path.join(rgb_dir, f)}, {os.path.join(disease_dir, f)}, {os.path.join(leaf_dir, f)}")
-
-        return paired_images
-
-
-    def load_images_and_masks(self, paired_image_paths: list[tuple[str, str, str]], target_size: tuple[int, int] = (227, 227)) -> tuple[np.ndarray, np.ndarray]:
+    def load_images_and_masks(self, paired_image_paths, target_size=(227, 227)):
         combined_images = []
         disease_masks = []
-        for rgb_path, disease_path, leaf_path in paired_image_paths:
-            if os.path.exists(rgb_path) and os.path.exists(leaf_path) and os.path.exists(disease_path):
-                rgb_image = load_img(rgb_path, target_size=target_size, color_mode='rgb')
-                leaf_mask = load_img(leaf_path, target_size=target_size, color_mode='grayscale')
-                disease_mask = load_img(disease_path, target_size=target_size, color_mode='grayscale')
+        disease_types = [] 
 
-                rgb_image = img_to_array(rgb_image)
-                leaf_mask = img_to_array(leaf_mask)
-                disease_mask = img_to_array(disease_mask)
+        for rgb_path, disease_path, leaf_path, disease_type in paired_image_paths:
+            rgb_image = img_to_array(load_img(rgb_path, target_size=target_size, color_mode='rgb')) / 255.0
+            leaf_mask = img_to_array(load_img(leaf_path, target_size=target_size, color_mode='grayscale')) / 255.0
+            leaf_mask = np.repeat(leaf_mask, 3, axis=-1)
+            disease_mask = preprocess_mask(disease_path, target_size)
 
-                rgb_image = rgb_image / 255.0  # Rescale pixel values to [0, 1]
-                leaf_mask = np.repeat(leaf_mask / 255.0, 3, axis=-1)  # Also rescale and replicate the leaf mask
+            combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
+            combined_images.append(combined_image)
+            disease_masks.append(disease_mask)
+            disease_types.append(disease_type) 
 
-                combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
-                combined_images.append(combined_image)
-                disease_masks.append(disease_mask / 255.0)
-            else:
-                print(f"Image not found: {rgb_path}, {disease_path}, {leaf_path}")
-                print(f"Total loaded images: {len(combined_images)}")
-            print(f"Total loaded masks: {len(disease_masks)}")
-        return np.array(combined_images), np.array(disease_masks)
+        return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
+
 
     def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
-        """
-        Loads images from given paths.
 
-        Parameters:
-            image_paths (list[str]): List of image file paths.
-            is_mask (bool): Specifies whether the images are masks.
-            target_size (tuple[int, int]): Target size for resizing the images.
-
-        Returns:
-            np.ndarray: Numpy array of loaded and preprocessed images.
-        """
         images = []
         for image_path in image_paths:
             if os.path.exists(image_path) and image_path.endswith('.png'):
@@ -128,31 +137,45 @@ class AlexNetModel:
         return np.array(images)
 
     def _build_model(self) -> Model:
-        """
-        Builds the AlexNet-based segmentation model.
-
-        Returns:
-            Model: A tf.keras.Model object representing the segmentation model.
-        """
-        input_tensor = Input(shape=(227, 227, 6))  # Adjust input size for AlexNet dimensions
+        input_tensor = Input(shape=(227, 227, 6))
 
         # Extract RGB and mask channels from the input
         processed_rgb = Lambda(lambda x: x[:, :, :, :3])(input_tensor)
         processed_mask = Lambda(lambda x: x[:, :, :, 3:])(input_tensor)
 
-        # AlexNet-like architecture
-        x = Conv2D(96, (11, 11), strides=4, activation='relu')(processed_rgb)
-        x = MaxPooling2D((3, 3), strides=2)(x)
-        x = Conv2D(256, (5, 5), padding='same', activation='relu')(x)
-        x = MaxPooling2D((3, 3), strides=2)(x)
-        x = Conv2D(384, (3, 3), padding='same', activation='relu')(x)
-        x = Conv2D(384, (3, 3), padding='same', activation='relu')(x)
-        x = Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        # Initial Convolution and Pooling Layers
+        x = Conv2D(96, (11, 11), strides=4, kernel_regularizer=l2(0.01))(processed_rgb)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = BatchNormalization()(x)
         x = MaxPooling2D((3, 3), strides=2)(x)
 
-        # UpSampling for Segmentation
+        # Second Convolution with depthwise separable convolution
+        x = SeparableConv2D(256, (5, 5), padding='same', depthwise_regularizer=l2(0.01), pointwise_regularizer=l2(0.01))(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = SpatialDropout2D(0.5)(x)
+        x = BatchNormalization()(x)
+        x = MaxPooling2D((3, 3), strides=2)(x)
+
+        # Continuing with Convolutional Layers and applying squeeze-excite blocks
+        x = Conv2D(384, (3, 3), padding='same', kernel_regularizer=l2(0.01))(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = BatchNormalization()(x)
+        x = squeeze_excite_block(x)
+
+        x = Conv2D(384, (3, 3), padding='same', kernel_regularizer=l2(0.01))(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = BatchNormalization()(x)
+        x = squeeze_excite_block(x)
+
+        x = Conv2D(256, (3, 3), padding='same', kernel_regularizer=l2(0.01))(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = SpatialDropout2D(0.5)(x)
+        x = BatchNormalization()(x)
+        x = MaxPooling2D((3, 3), strides=2)(x)
+
+        # Upsampling
         x = UpSampling2D(size=(2, 2))(x)
-        x = Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+        x = Conv2D(128, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
         x = UpSampling2D(size=(2, 2))(x)
         x = Resizing(227, 227)(x)
 
@@ -162,59 +185,62 @@ class AlexNetModel:
         # Output layer for segmentation
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(combined)
 
+
         return Model(inputs=input_tensor, outputs=disease_segmentation)
 
-    def _create_directory(self, path: str) -> None:
-        """
-        Creates a directory if it does not exist.
 
-        Parameters:
-            path (str): The path of the directory to be created.
-        """
+    def _create_directory(self, path: str) -> None:
+
         if not os.path.exists(path):
             os.makedirs(path)
 
     def compile_and_train(self, epochs: int, batch_size: int, output_dir: str) -> tf.keras.callbacks.History:
-        """
-        Compiles and trains the model.
-
-        Parameters:
-            epochs (int): Number of epochs for training.
-            batch_size (int): Batch size for training.
-            output_dir (str): Output directory to save training artifacts.
-
-        Returns:
-            tf.keras.callbacks.History: History object containing training metrics.
-        """
         # Directory setup
         self._create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
         self._create_directory(plots_dir)
 
-        # Generate paired image paths
-        paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
+        # Generate paired image paths with labels
+        paired_image_paths_with_labels = self.pair_images_by_filename(self.rgb_dir, self.disease_segmented_dir, self.leaf_segmented_dir)
 
-        # Load and preprocess data
-        combined_inputs, disease_labels = self.load_images_and_masks(paired_image_paths, target_size=(227, 227))
+        # Split the data into training and validation sets while maintaining the structure
+        train_data, val_data = train_test_split(paired_image_paths_with_labels, test_size=self.val_split, stratify=[item[3] for item in paired_image_paths_with_labels], random_state=42)
 
-        # Model compilation
-        disease_metrics = ['accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
+        # Load images and masks for training and validation
+        combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(train_data, target_size=(227, 227))
+        combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(val_data, target_size=(227, 227))
+
+        # Initialize BinarySegmentationMetrics with validation data and disease types
+        binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'AlexNet', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
+
+        # Model compilation with binary segmentation in mind
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate),
-                           loss={'disease_segmentation': BinaryCrossentropy()},
-                           metrics={'disease_segmentation': disease_metrics}
-                           )
-        
-        iou_logger = IoULogger(output_dir)
+                        loss='binary_crossentropy',
+                        metrics=['accuracy'])
 
-        # Model training
-        history = self.model.fit(combined_inputs, 
-                                 disease_labels,
-                                 epochs=epochs,
-                                 batch_size=batch_size,
-                                 validation_split=self.val_split,
-                                 callbacks=[iou_logger])
+        lr_callback = LearningRateScheduler(scheduler)
+
+        # Create an EarlyStopping callback
+        es_callback = EarlyStopping(monitor='val_accuracy', patience=5)
+
+        history = self.model.fit(
+            combined_inputs_train, disease_labels_train,
+            validation_data=(combined_inputs_val, disease_labels_val),
+            epochs=epochs, batch_size=batch_size,
+            callbacks=[binary_segmentation_metrics, lr_callback, es_callback]
+        )
 
         # Save training metrics and history
         save_history_to_txt(history, output_dir)
+        
+        binary_segmentation_metrics.save_results_to_excel()
+
+        output_layer = self.model.layers[-1]
+        print("Output layer type:", output_layer.__class__.__name__)
+        print("Output layer config:", output_layer.get_config())
 
         return history
+
+
+
+

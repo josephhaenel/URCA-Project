@@ -1,122 +1,96 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing
+from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply, GlobalAveragePooling2D, Dense, Reshape, Activation
 from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import Recall
 from tensorflow.keras.losses import BinaryCrossentropy
+from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
+from sklearn.model_selection import train_test_split
 from utils.F1Score import F1Score
 from utils.IoUMetric import IoUMetric, IoULogger
 from utils.GraphPlotter import save_history_to_txt
+from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import LearningRateScheduler
+from tensorflow.keras.callbacks import EarlyStopping
 
 # Suppress TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 class InceptionResNetV2Model:
-    """
-    A class for creating and training an InceptionResNetV2-based model for image segmentation.
 
-    Attributes:
-        rgb_dirs (list[str]): Directory paths for RGB images.
-        disease_segmented_dirs (list[str]): Directory paths for disease-segmented images.
-        leaf_segmented_dirs (list[str]): Directory paths for leaf-segmented images.
-        learning_rate (float): Learning rate for the model training.
-        val_split (float): Validation split for the model training.
-        model (Model): The TensorFlow Keras model.
-
-    Methods:
-        load_images_and_masks: Loads and processes images and masks.
-        pair_images_by_filename: Pairs images by filename from given directories.
-        load_images: Loads and preprocesses images.
-        _build_model: Constructs the InceptionResNetV2-based model.
-        _create_directory: Ensures a directory exists.
-        print_history_keys: Prints keys from the training history.
-        compile_and_train: Compiles and trains the model.
-    """
-
-    def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], 
-                 learning_rate: float, val_split: float) -> None:
+    def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], learning_rate: float, val_split: float, dataset_name: str) -> None:
         self.rgb_dirs = rgb_dirs
         self.disease_segmented_dirs = disease_segmented_dirs
         self.leaf_segmented_dirs = leaf_segmented_dirs
         self.learning_rate = learning_rate
         self.val_split = val_split
+        self.dataset_name = dataset_name
         self.model = self._build_model()
         
-    def load_images_and_masks(self, paired_image_paths: list[tuple[str, str, str]], target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
-        """
-        Loads and processes images and masks from given file paths.
-
-        Parameters:
-            paired_image_paths (list[tuple[str, str, str]]): Each tuple contains paths for the RGB image, leaf mask, and disease mask.
-            target_size (tuple[int, int]): The target size for resizing the images.
-
-        Returns:
-            np.ndarray: Array of combined RGB and mask images.
-        """
+    def load_images_and_masks(self, paired_image_paths, target_size=(299, 299)) -> tuple[np.ndarray, np.ndarray, list]:
         combined_images = []
-        for rgb_path, leaf_path, disease_path in paired_image_paths:
-            # Check if all paths exist
-            if os.path.exists(rgb_path) and os.path.exists(leaf_path) and os.path.exists(disease_path):
-                # Load and preprocess images
+        disease_masks = []
+        disease_types = []
+
+        for rgb_path, leaf_mask_path, disease_path, disease_type in paired_image_paths:
+            if os.path.exists(rgb_path) and os.path.exists(leaf_mask_path) and os.path.exists(disease_path):
                 rgb_image = preprocess_input(img_to_array(load_img(rgb_path, target_size=target_size, color_mode='rgb')))
-                leaf_mask = np.repeat(img_to_array(load_img(leaf_path, target_size=target_size, color_mode='grayscale')) / 255.0, 3, axis=-1)
-                disease_mask = np.repeat(img_to_array(load_img(disease_path, target_size=target_size, color_mode='grayscale')) / 255.0, 3, axis=-1)
-
-                # Concatenate images
-                combined_image = np.concatenate([rgb_image, leaf_mask, disease_mask], axis=-1)
+                
+                leaf_mask = img_to_array(load_img(leaf_mask_path, target_size=target_size, color_mode='grayscale'))
+                if leaf_mask.ndim == 2:  # Check if leaf_mask is 2D
+                    leaf_mask = np.expand_dims(leaf_mask, axis=-1)  # Add a single channel dimension to make it 3D
+                
+                # Check the shape of leaf_mask to ensure it is 3D (height, width, channels)
+                if leaf_mask.shape[-1] != 1:
+                    raise ValueError(f"Leaf mask should have one channel. Found shape: {leaf_mask.shape}")
+                
+                combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
                 combined_images.append(combined_image)
-            else:
-                print(f"Image not found: {rgb_path}, {leaf_path}, {disease_path}")
-        return np.array(combined_images)
+                
+                disease_mask = img_to_array(load_img(disease_path, target_size=(256, 256), color_mode='grayscale'))
+                
+                disease_mask = np.where(disease_mask > 127, 1, 0)
+                disease_mask = np.expand_dims(disease_mask, axis=-1)  # Ensure disease mask has a single channel
+                disease_masks.append(disease_mask)
+                
+                disease_types.append(disease_type)
 
+        return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
 
-    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str]]:
-        """
-        Pairs images by filename from given directories.
-
-        Parameters:
-            base_rgb_dir (str): Base directory path for RGB images.
-            base_disease_dir (str): Base directory path for disease-segmented images.
-            base_leaf_dir (str): Base directory path for leaf-segmented images.
-
-        Returns:
-            list[tuple[str, str, str]]: List of tuples containing paths of paired RGB, disease, and leaf images.
-        """
+    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str, str]]:
         paired_images = []
         for disease in os.listdir(base_rgb_dir):
             rgb_dir = os.path.join(base_rgb_dir, disease)
             disease_dir = os.path.join(base_disease_dir, disease)
             leaf_dir = os.path.join(base_leaf_dir, disease)
 
+            # Ensure directories for RGB, disease, and leaf images exist
             if not os.path.isdir(rgb_dir) or not os.path.isdir(disease_dir) or not os.path.isdir(leaf_dir):
                 print(f"One of the directories is invalid: {rgb_dir}, {disease_dir}, {leaf_dir}")
                 continue
 
-            rgb_files = {f for f in os.listdir(rgb_dir) if f.endswith('.png')}
-            disease_files = {f for f in os.listdir(disease_dir) if f.endswith('.png')}
-            leaf_files = {f for f in os.listdir(leaf_dir) if f.endswith('.png')}
+            # Iterate over RGB images and match with corresponding disease and leaf images
+            for file_name in os.listdir(rgb_dir):
+                if file_name.endswith('.png'):
+                    rgb_path = os.path.join(rgb_dir, file_name)
+                    disease_path = os.path.join(disease_dir, file_name)
+                    leaf_path = os.path.join(leaf_dir, file_name)
 
-            common_files = rgb_files.intersection(disease_files, leaf_files)
-            paired_images.extend([(os.path.join(rgb_dir, f), os.path.join(disease_dir, f), os.path.join(leaf_dir, f)) for f in common_files])
+                    # Ensure paths for RGB, disease, and leaf images exist before adding
+                    if os.path.exists(rgb_path) and os.path.exists(disease_path) and os.path.exists(leaf_path):
+                        paired_images.append((rgb_path, leaf_path, disease_path, disease))
+                    else:
+                        print(f"Missing image for {file_name} in {disease}")
 
         return paired_images
 
+
     def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
-        """
-        Loads and preprocesses images.
-
-        Parameters:
-            image_paths (list[str]): List of image file paths.
-            is_mask (bool): Specifies whether the images are masks.
-            target_size (tuple[int, int]): Target size for resizing the images.
-
-        Returns:
-            np.ndarray: Numpy array of loaded and preprocessed images.
-        """
         images = []
         for image_path in image_paths:
             if os.path.exists(image_path) and image_path.endswith('.png'):
@@ -128,33 +102,42 @@ class InceptionResNetV2Model:
                 print(f"Image not found: {image_path}")
         return np.array(images)
 
-    def _build_model(self) -> Model:
-        """
-        Constructs the InceptionResNetV2-based model.
+    def _build_model(self):
+        # Input tensor for RGB images and leaf segmentation mask
+        input_tensor = Input(shape=(299, 299, 4))
 
-        Returns:
-            Model: The constructed TensorFlow Keras model.
-        """
-        print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
+        # Split RGB and mask
+        processed_rgb = Lambda(lambda x: x[..., :3])(input_tensor)
+        processed_mask = Lambda(lambda x: x[..., 3:])(input_tensor)
+
+        # Process RGB channels with InceptionResNetV2
+        base_model_rgb = InceptionResNetV2(weights='imagenet', include_top=False, input_tensor=processed_rgb)
+        rgb_features = base_model_rgb.output
+
+        # Process the leaf segmentation mask through separate layers
+        mask_conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(processed_mask)
+        mask_conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(mask_conv1)
         
-        input_tensor = Input(shape=(299, 299, 9))
+        mask_conv_resized = Resizing(8, 8)(mask_conv2)
 
-        # Custom layer to process the 6-channel input
-        processed_input = Lambda(lambda x: x[:, :, :, :3])(input_tensor)
+        # Combine base_model_rgb output with processed mask features
+        combined_features = concatenate([rgb_features, mask_conv_resized])
 
-        # Load the base InceptionResNetV2 model with the processed input
-        base_model = InceptionResNetV2(weights='imagenet', include_top=False, input_tensor=processed_input)
+        # Attention Mechanism
+        attention_map = Conv2D(1, (1, 1), activation='sigmoid')(combined_features)
+        attention_features = Multiply()([combined_features, attention_map])
 
-        x = base_model.output
-        x = Conv2D(512, (3, 3), activation='relu', padding='same')(x)
+        # Continue with custom layers after combining features
+        x = Conv2D(512, (3, 3), activation='relu', padding='same')(attention_features)
         x = UpSampling2D(size=(2, 2))(x)
         x = Conv2D(256, (3, 3), activation='relu', padding='same')(x)
         x = UpSampling2D(size=(2, 2))(x)
         x = Resizing(256, 256)(x)
 
+        # Final output layer for disease segmentation
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
-        model = Model(inputs=base_model.input, outputs=disease_segmentation)
-        return model
+
+        return Model(inputs=input_tensor, outputs=disease_segmentation)
 
     def _create_directory(self, path: str) -> None:
         """
@@ -177,48 +160,87 @@ class InceptionResNetV2Model:
         for key in history.history.keys():
             print(key)
 
-    def compile_and_train(self, epochs: int, batch_size: int, output_dir: str) -> tf.keras.callbacks.History:
-        """
-        Compiles and trains the model.
-
-        Parameters:
-            epochs (int): Number of epochs for training.
-            batch_size (int): Batch size for training.
-            output_dir (str): Output directory to save training artifacts.
-
-        Returns:
-            tf.keras.callbacks.History: History object containing training metrics.
-        """
+    def compile_and_train(self, epochs: int, batch_size: int, output_dir: str):
         # Directory setup
         self._create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
         self._create_directory(plots_dir)
 
-        # Load and preprocess data
-        paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
-        combined_inputs = self.load_images_and_masks(paired_image_paths)
-        disease_labels = self.load_images([d[2] for d in paired_image_paths], is_mask=True, target_size=(256, 256))
+        # Define learning rate schedule function
+        def lr_schedule(epoch):
+            if epoch < 10:
+                return 0.001
+            elif epoch < 20:
+                return 0.0005
+            else:
+                return 0.0001
 
+        # Create LearningRateScheduler callback
+        lr_scheduler = LearningRateScheduler(lr_schedule)
+
+        # Create EarlyStopping callback
+        early_stopping = EarlyStopping(monitor='val_accuracy', patience=10)
+
+        # Load and preprocess data
+        all_paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
+
+        # Initialize empty lists for training and validation datasets
+        disease_groups = {}
+        for path in all_paired_image_paths:
+            disease = path[3]  # Assuming the disease type is indeed the fourth element
+            if disease not in disease_groups:
+                disease_groups[disease] = []
+            disease_groups[disease].append(path)
+
+        # Initialize empty lists for stratified training and validation datasets
+        stratified_train_data = []
+        stratified_val_data = []
+
+        # Split each group into stratified training and validation sets
+        for disease, paths in disease_groups.items():
+            train_paths, val_paths = train_test_split(
+                paths, 
+                test_size=self.val_split, 
+                stratify=[p[3] for p in paths],  # Stratify by the disease type
+                random_state=42
+            )
+            stratified_train_data.extend(train_paths)
+            stratified_val_data.extend(val_paths)
+
+        # Preparing training and validation datasets
+        combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(stratified_train_data)
+        combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(stratified_val_data)
+
+        binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'InceptionResNetV2', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
+        
         # Model compilation
-        disease_metrics = ['accuracy', F1Score(), Recall(name='recall'), IoUMetric()]
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
                         loss=BinaryCrossentropy(),
-                        metrics=disease_metrics)
-        
-        iou_logger = IoULogger(output_dir)
+                        metrics=['accuracy'])
 
-        # Model training
+        # Data augmentation
+        datagen = ImageDataGenerator(
+            rotation_range=20,
+            width_shift_range=0.2,
+            height_shift_range=0.2,
+            horizontal_flip=True)
+
+        # Fits the model on batches with real-time data augmentation
         history = self.model.fit(
-            combined_inputs, 
-            disease_labels, 
+            datagen.flow(combined_inputs_train, disease_labels_train, batch_size=batch_size),
+            validation_data=(combined_inputs_val, disease_labels_val),
             epochs=epochs, 
-            batch_size=batch_size, 
-            validation_split=self.val_split,
-            callbacks=[iou_logger])
+            callbacks=[binary_segmentation_metrics, lr_scheduler, early_stopping]  # Add early_stopping to callbacks
+            )
+        
+        binary_segmentation_metrics.save_results_to_excel()
 
-        # Saving training metrics plots
+        # Save the model and training history
         save_history_to_txt(history, output_dir)
 
         return history
+
+
+
 
 
