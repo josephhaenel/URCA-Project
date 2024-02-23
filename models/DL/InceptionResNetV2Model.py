@@ -9,6 +9,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.metrics import Recall
 from tensorflow.keras.losses import BinaryCrossentropy
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
+from kerastuner import RandomSearch, HyperParameters
 from sklearn.model_selection import train_test_split
 from utils.F1Score import F1Score
 from utils.IoUMetric import IoUMetric, IoULogger
@@ -17,11 +18,19 @@ from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras import regularizers
 
 # Suppress TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
-class InceptionResNetV2Model:
+def dice_loss(y_true, y_pred, smooth=1):
+    y_true = tf.cast(y_true, tf.float32)  # Add this line
+    intersection = tf.reduce_sum(y_true * y_pred, axis=[1,2,3])
+    union = tf.reduce_sum(y_true, axis=[1,2,3]) + tf.reduce_sum(y_pred, axis=[1,2,3])
+    dice = tf.reduce_mean((2. * intersection + smooth)/(union + smooth), axis=0)
+    return 1 - dice
+
+class InceptionResNetV2Model: 
 
     def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], learning_rate: float, val_split: float, dataset_name: str) -> None:
         self.rgb_dirs = rgb_dirs
@@ -127,10 +136,13 @@ class InceptionResNetV2Model:
         attention_map = Conv2D(1, (1, 1), activation='sigmoid')(combined_features)
         attention_features = Multiply()([combined_features, attention_map])
 
-        # Continue with custom layers after combining features
-        x = Conv2D(512, (3, 3), activation='relu', padding='same')(attention_features)
+        x = Conv2D(1024, (3, 3), activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.01))(attention_features)
+        x = tf.keras.layers.BatchNormalization()(x)  # Add Batch Normalization
+        x = Conv2D(512, (3, 3), activation='relu', padding='same', kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(0.01))(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
         x = UpSampling2D(size=(2, 2))(x)
-        x = Conv2D(256, (3, 3), activation='relu', padding='same')(x)
+        x = Conv2D(256, (3, 3), activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.01))(x)
+        x = tf.keras.layers.Dropout(0.5)(x)  # Add another dropout layer
         x = UpSampling2D(size=(2, 2))(x)
         x = Resizing(256, 256)(x)
 
@@ -166,20 +178,8 @@ class InceptionResNetV2Model:
         plots_dir = os.path.join(output_dir, 'plots')
         self._create_directory(plots_dir)
 
-        # Define learning rate schedule function
-        def lr_schedule(epoch):
-            if epoch < 10:
-                return 0.001
-            elif epoch < 20:
-                return 0.0005
-            else:
-                return 0.0001
-
-        # Create LearningRateScheduler callback
-        lr_scheduler = LearningRateScheduler(lr_schedule)
-
         # Create EarlyStopping callback
-        early_stopping = EarlyStopping(monitor='val_accuracy', patience=10)
+        early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=25)
 
         # Load and preprocess data
         all_paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
@@ -214,23 +214,35 @@ class InceptionResNetV2Model:
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'InceptionResNetV2', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
         
         # Model compilation
-        self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
-                        loss=BinaryCrossentropy(),
-                        metrics=['accuracy'])
-
-        # Data augmentation
-        datagen = ImageDataGenerator(
-            rotation_range=20,
-            width_shift_range=0.2,
-            height_shift_range=0.2,
-            horizontal_flip=True)
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
+                        loss=dice_loss,
+                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         # Fits the model on batches with real-time data augmentation
         history = self.model.fit(
-            datagen.flow(combined_inputs_train, disease_labels_train, batch_size=batch_size),
+                        combined_inputs_train, 
+            disease_labels_train, 
             validation_data=(combined_inputs_val, disease_labels_val),
             epochs=epochs, 
-            callbacks=[binary_segmentation_metrics, lr_scheduler, early_stopping]  # Add early_stopping to callbacks
+            callbacks=[binary_segmentation_metrics, early_stopping]  # Add early_stopping to callbacks
+            )
+
+        # Unfreeze all layers
+        for layer in self.model.layers:
+            layer.trainable = True
+
+        # Recompile the model
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
+                        loss=dice_loss,
+                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
+
+        # Fit the model again
+        history = self.model.fit(
+                        combined_inputs_train, 
+            disease_labels_train, 
+            validation_data=(combined_inputs_val, disease_labels_val),
+            epochs=epochs, 
+            callbacks=[binary_segmentation_metrics, early_stopping]  # Add early_stopping to callbacks
             )
         
         binary_segmentation_metrics.save_results_to_excel()
@@ -239,7 +251,6 @@ class InceptionResNetV2Model:
         save_history_to_txt(history, output_dir)
 
         return history
-
 
 
 

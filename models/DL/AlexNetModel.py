@@ -220,7 +220,7 @@ class AlexNetModel:
 
         lr_callback = LearningRateScheduler(scheduler)
 
-        # Create an EarlyStopping callback
+        # EarlyStopping callback
         es_callback = EarlyStopping(monitor='val_accuracy', patience=5)
 
         history = self.model.fit(

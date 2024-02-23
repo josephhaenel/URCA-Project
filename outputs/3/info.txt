@@ -1,0 +1,4 @@
+ResNet50 learningRate = 0.0001
+ResNet50 valSplit = 0.2AlexNet learningRate = 0.0001
+AlexNet valSplit = 0.2InceptionResNetV2 learningRate = 0.01
+InceptionResNetV2 valSplit = 0.2

@@ -2,9 +2,9 @@ import tensorflow as tf
 import os
 
 class IoUMetric(tf.keras.metrics.Metric):
-    def __init__(self, name='iou_score', **kwargs):
+    def __init__(self, name='IoU', **kwargs):
         super(IoUMetric, self).__init__(name=name, **kwargs)
-        self.total_iou = self.add_weight(name='total_iou', initializer='zeros')
+        self.total_iou = self.add_weight(name='iou', initializer='zeros')
         self.count = self.add_weight(name='count', initializer='zeros')
 
     def update_state(self, y_true, y_pred, sample_weight=None):
@@ -25,6 +25,10 @@ class IoUMetric(tf.keras.metrics.Metric):
     def reset_states(self):
         self.total_iou.assign(0.0)
         self.count.assign(0.0)
+    
+    @property
+    def variables(self):
+        return [self.total_iou, self.count]
         
 class IoULogger(tf.keras.callbacks.Callback):
     def __init__(self, output_dir):

@@ -1,2 +1,0 @@
-learningRate = 0.001
-valSplit = 0.5
