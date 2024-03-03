@@ -13,6 +13,9 @@ from utils.SaveHistoryToTxt import save_history_to_txt
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from tensorflow.keras.callbacks import EarlyStopping, LearningRateScheduler
 
+from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
+from utils.CreateDirectory import _create_directory
+
 def scheduler(epoch, lr):
     if epoch < 10:
         return lr
@@ -70,31 +73,6 @@ class AlexNetModel:
         in a given directory. Assumes each subdirectory corresponds to a unique class.
         """
         return len([name for name in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, name))])
-        
-    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str):
-        paired_images_with_labels = []
-        # Loop through each disease type directory in the RGB directory
-        for disease_type in os.listdir(base_rgb_dir):
-            rgb_disease_dir = os.path.join(base_rgb_dir, disease_type)
-            disease_segmented_disease_dir = os.path.join(base_disease_dir, disease_type)
-            leaf_segmented_disease_dir = os.path.join(base_leaf_dir, disease_type)
-
-            # Check that directories exist in all three locations
-            if not os.path.isdir(rgb_disease_dir) or not os.path.isdir(disease_segmented_disease_dir) or not os.path.isdir(leaf_segmented_disease_dir):
-                continue
-
-            for file_name in os.listdir(rgb_disease_dir):
-                rgb_path = os.path.join(rgb_disease_dir, file_name)
-                disease_path = os.path.join(disease_segmented_disease_dir, file_name)
-                leaf_path = os.path.join(leaf_segmented_disease_dir, file_name)
-
-                # Ensure all paths exist before adding
-                if os.path.exists(rgb_path) and os.path.exists(disease_path) and os.path.exists(leaf_path):
-                    paired_images_with_labels.append((rgb_path, disease_path, leaf_path, disease_type))
-                else:
-                    print(f"Missing image for {file_name} in {disease_type}")
-        
-        return paired_images_with_labels
 
     def load_images_and_masks(self, paired_image_paths, target_size=(227, 227)):
         combined_images = []
@@ -113,20 +91,6 @@ class AlexNetModel:
             disease_types.append(disease_type) 
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
-
-
-    def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
-
-        images = []
-        for image_path in image_paths:
-            if os.path.exists(image_path) and image_path.endswith('.png'):
-                image = load_img(image_path, target_size=target_size, color_mode='grayscale' if is_mask else 'rgb')
-                image = img_to_array(image)
-                image = image / 255.0 if is_mask else preprocess_input(image)
-                images.append(image)
-            else:
-                print(f"Image not found: {image_path}")
-        return np.array(images)
 
     def _build_model(self) -> Model:
         input_tensor = Input(shape=(227, 227, 6))
@@ -180,20 +144,14 @@ class AlexNetModel:
 
         return Model(inputs=input_tensor, outputs=disease_segmentation)
 
-
-    def _create_directory(self, path: str) -> None:
-
-        if not os.path.exists(path):
-            os.makedirs(path)
-
     def compile_and_train(self, epochs: int, batch_size: int, output_dir: str) -> tf.keras.callbacks.History:
         # Directory setup
-        self._create_directory(output_dir)
+        _create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
-        self._create_directory(plots_dir)
+        _create_directory(plots_dir)
 
         # Generate paired image paths with labels
-        paired_image_paths_with_labels = self.pair_images_by_filename(self.rgb_dir, self.disease_segmented_dir, self.leaf_segmented_dir)
+        paired_image_paths_with_labels = pair_images_by_filename(self.rgb_dir, self.disease_segmented_dir, self.leaf_segmented_dir)
 
         # Split the data into training and validation sets while maintaining the structure
         train_data, val_data = train_test_split(paired_image_paths_with_labels, test_size=self.val_split, stratify=[item[3] for item in paired_image_paths_with_labels], random_state=42)

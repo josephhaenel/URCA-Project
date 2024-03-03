@@ -27,6 +27,14 @@ def run_all_models(base_directories):
         
         infoPath = os.path.join('outputs', str(number), 'info.txt')
         
+        InceptionResNetV2_learning_rate = 0.001 # 0.001, 0.0001
+        InceptionResNetV2_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
+        
+        # Run Inception ResNet V2 Model
+        inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
+        inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, InceptionResNetV2_learning_rate, InceptionResNetV2_val_split, last_part)
+        inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=50, batch_size=32, output_dir=inception_resnet_v2_output_dir)
+        
         ResNet50_learning_rate = 0.001 # 0.001, 0.0001
         ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
         
@@ -42,14 +50,6 @@ def run_all_models(base_directories):
         alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
         alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir, AlexNet_learning_rate, AlexNet_val_split, last_part)
         alexnet_history = alexnet_model.compile_and_train(epochs=30, batch_size=32, output_dir=alexnet_output_dir)
-        
-        InceptionResNetV2_learning_rate = 0.001 # 0.001, 0.0001
-        InceptionResNetV2_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
-        
-        # Run Inception ResNet V2 Model
-        inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
-        inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, InceptionResNetV2_learning_rate, InceptionResNetV2_val_split, last_part)
-        inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=50, batch_size=32, output_dir=inception_resnet_v2_output_dir)
         
         with open(infoPath, "w") as f:
             # Write learning rate and validation split to info.txt file

@@ -8,9 +8,11 @@ from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from sklearn.model_selection import train_test_split
 from utils.SaveHistoryToTxt import save_history_to_txt
-from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras import regularizers
+
+from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
+from utils.CreateDirectory import _create_directory
 
 # Suppress TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -63,46 +65,6 @@ class InceptionResNetV2Model:
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
 
-    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str, str]]:
-        paired_images = []
-        for disease in os.listdir(base_rgb_dir):
-            rgb_dir = os.path.join(base_rgb_dir, disease)
-            disease_dir = os.path.join(base_disease_dir, disease)
-            leaf_dir = os.path.join(base_leaf_dir, disease)
-
-            # Ensure directories for RGB, disease, and leaf images exist
-            if not os.path.isdir(rgb_dir) or not os.path.isdir(disease_dir) or not os.path.isdir(leaf_dir):
-                print(f"One of the directories is invalid: {rgb_dir}, {disease_dir}, {leaf_dir}")
-                continue
-
-            # Iterate over RGB images and match with corresponding disease and leaf images
-            for file_name in os.listdir(rgb_dir):
-                if file_name.endswith('.png'):
-                    rgb_path = os.path.join(rgb_dir, file_name)
-                    disease_path = os.path.join(disease_dir, file_name)
-                    leaf_path = os.path.join(leaf_dir, file_name)
-
-                    # Ensure paths for RGB, disease, and leaf images exist before adding
-                    if os.path.exists(rgb_path) and os.path.exists(disease_path) and os.path.exists(leaf_path):
-                        paired_images.append((rgb_path, leaf_path, disease_path, disease))
-                    else:
-                        print(f"Missing image for {file_name} in {disease}")
-
-        return paired_images
-
-
-    def load_images(self, image_paths: list[str], is_mask: bool = False, target_size: tuple[int, int] = (299, 299)) -> np.ndarray:
-        images = []
-        for image_path in image_paths:
-            if os.path.exists(image_path) and image_path.endswith('.png'):
-                image = load_img(image_path, target_size=target_size, color_mode='grayscale' if is_mask else 'rgb')
-                image = img_to_array(image)
-                image = image / 255.0 if is_mask else preprocess_input(image)
-                images.append(image)
-            else:
-                print(f"Image not found: {image_path}")
-        return np.array(images)
-
     def _build_model(self):
         # Input tensor for RGB images and leaf segmentation mask
         input_tensor = Input(shape=(299, 299, 4))
@@ -143,38 +105,17 @@ class InceptionResNetV2Model:
 
         return Model(inputs=input_tensor, outputs=disease_segmentation)
 
-    def _create_directory(self, path: str) -> None:
-        """
-        Ensures a directory exists. Creates one if it does not exist.
-
-        Parameters:
-            path (str): The path of the directory to be checked or created.
-        """
-        if not os.path.exists(path):
-            os.makedirs(path)
-
-    def print_history_keys(self, history: tf.keras.callbacks.History) -> None:
-        """
-        Prints keys from the training history. For debugging purposes.
-
-        Parameters:
-            history (tf.keras.callbacks.History): The history object from model training.
-        """
-        print("Keys in training history:")
-        for key in history.history.keys():
-            print(key)
-
     def compile_and_train(self, epochs: int, batch_size: int, output_dir: str):
         # Directory setup
-        self._create_directory(output_dir)
+        _create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
-        self._create_directory(plots_dir)
+        _create_directory(plots_dir)
 
         # Create EarlyStopping callback
         early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=25)
 
         # Load and preprocess data
-        all_paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
+        all_paired_image_paths = pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
 
         # Initialize empty lists for training and validation datasets
         disease_groups = {}
@@ -200,8 +141,10 @@ class InceptionResNetV2Model:
             stratified_val_data.extend(val_paths)
 
         # Preparing training and validation datasets
-        combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(stratified_train_data)
-        combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(stratified_val_data)
+        combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(
+            stratified_train_data,  target_size=(299, 299))
+        combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(
+            stratified_val_data,  target_size=(299, 299))
 
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'InceptionResNetV2', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
         
