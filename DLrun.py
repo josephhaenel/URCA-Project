@@ -1,6 +1,5 @@
 import os
 import sys
-import smtplib
 
 from models.DL.InceptionResNetV2Model import InceptionResNetV2Model
 from models.DL.AlexNetModel import AlexNetModel
@@ -8,8 +7,6 @@ from models.DL.ResNet50Model import ResNet50Model
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
-APP_PASSWORD = '' # REMOVE LATER ******************************************************
 
 
 def run_all_models(base_directories):
@@ -68,24 +65,24 @@ def run_all_models(base_directories):
     #     "josephhaenel@gmail.com"
     # )
     
-def send_email(subject, message, recipient_email, sender_email):
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = recipient_email
-    msg['Subject'] = subject
+# def send_email(subject, message, recipient_email, sender_email):
+#     msg = MIMEMultipart()
+#     msg['From'] = sender_email
+#     msg['To'] = recipient_email
+#     msg['Subject'] = subject
 
-    msg.attach(MIMEText(message, 'plain'))
+#     msg.attach(MIMEText(message, 'plain'))
 
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(sender_email, APP_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(sender_email, recipient_email, text)
-        server.quit()
-        print("Email sent successfully")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
+#     try:
+#         server = smtplib.SMTP('smtp.gmail.com', 587)
+#         server.starttls()
+#         server.login(sender_email, APP_PASSWORD)
+#         text = msg.as_string()
+#         server.sendmail(sender_email, recipient_email, text)
+#         server.quit()
+#         print("Email sent successfully")
+#     except Exception as e:
+#         print(f"Failed to send email: {e}")
 
 if __name__ == '__main__':
     if len(sys.argv) < 1:

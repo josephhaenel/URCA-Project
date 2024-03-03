@@ -1,22 +1,14 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply, GlobalAveragePooling2D, Dense, Reshape, Activation
+from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply
 from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.metrics import Recall
-from tensorflow.keras.losses import BinaryCrossentropy
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
-from kerastuner import RandomSearch, HyperParameters
 from sklearn.model_selection import train_test_split
-from utils.F1Score import F1Score
-from utils.IoUMetric import IoUMetric, IoULogger
-from utils.GraphPlotter import save_history_to_txt
+from utils.SaveHistoryToTxt import save_history_to_txt
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.callbacks import LearningRateScheduler
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras import regularizers
 

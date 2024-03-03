@@ -1,23 +1,15 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Resizing, concatenate, BatchNormalization, SpatialDropout2D, Conv2DTranspose, Dropout, LeakyReLU, GlobalAveragePooling2D, Reshape, Dense, multiply, concatenate, SeparableConv2D
+from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Resizing, concatenate, BatchNormalization, SpatialDropout2D, LeakyReLU, GlobalAveragePooling2D, Reshape, Dense, multiply, concatenate, SeparableConv2D
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications.inception_resnet_v2 import preprocess_input
-from tensorflow.keras.metrics import Recall
 from tensorflow.keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.regularizers import l2
-from tensorflow.keras.optimizers.schedules import ExponentialDecay
-from tensorflow.keras.utils import to_categorical
-import matplotlib.pyplot as plt
-from utils.F1Score import F1Score
-from utils.GraphPlotter import save_history_to_txt
-from utils.IoUMetric import IoUMetric, IoULogger
-from utils.LogPerClassMetrics import LogPerClassMetrics
-from utils.BinaryPerClassMetrics import BinaryPerClassMetrics
+from utils.SaveHistoryToTxt import save_history_to_txt
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from tensorflow.keras.callbacks import EarlyStopping, LearningRateScheduler
 

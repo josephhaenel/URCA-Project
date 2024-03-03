@@ -1,9 +1,0 @@
-ound 50 common files in folder Tomato_Bacterial_Spot
-Found 50 common files in folder Tomato_Early_Blight
-Found 50 common files in folder Tomato_Late_Blight
-Found 50 common files in folder Tomato_Leaf_Mold
-Found 50 common files in folder Tomato_Mosaic_Virus
-Found 50 common files in folder Tomato_Septoria_Leaf_Spot
-Found 50 common files in folder Tomato_Spider_Mites
-Found 50 common files in folder Tomato_Target_Spot
-Found 50 common files in folder Tomato_Yellow_Leaf_Curl_Virus

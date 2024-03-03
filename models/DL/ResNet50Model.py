@@ -7,10 +7,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from utils.F1Score import F1Score
-from utils.IoUMetric import IoUMetric, IoULogger
-from utils.GraphPlotter import save_history_to_txt
-from tensorflow.keras.metrics import Recall
+from utils.SaveHistoryToTxt import save_history_to_txt
 from sklearn.model_selection import train_test_split
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from tensorflow.keras.callbacks import LearningRateScheduler, EarlyStopping
