@@ -188,7 +188,7 @@ class ResNet50Model:
         lr_scheduler = LearningRateScheduler(lr_schedule)
 
         # Create EarlyStopping callback
-        early_stopping = EarlyStopping(monitor='val_accuracy', patience=10)
+        early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=10)
 
         # Load and preprocess data
         all_paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
@@ -225,7 +225,7 @@ class ResNet50Model:
         # Model compilation
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
                         loss=BinaryCrossentropy(),
-                        metrics=['accuracy'])
+                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         # Model training
         history = self.model.fit(

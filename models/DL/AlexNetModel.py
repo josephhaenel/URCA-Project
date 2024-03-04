@@ -216,12 +216,12 @@ class AlexNetModel:
         # Model compilation with binary segmentation in mind
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate),
                         loss='binary_crossentropy',
-                        metrics=['accuracy'])
+                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         lr_callback = LearningRateScheduler(scheduler)
 
         # EarlyStopping callback
-        es_callback = EarlyStopping(monitor='val_accuracy', patience=5)
+        es_callback = EarlyStopping(monitor='val_mean_io_u', patience=5)
 
         history = self.model.fit(
             combined_inputs_train, disease_labels_train,
