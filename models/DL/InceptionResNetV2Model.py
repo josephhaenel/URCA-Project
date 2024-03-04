@@ -3,7 +3,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply
 from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
-from tensorflow.keras.models import Model
+from keras.models import Model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from sklearn.model_selection import train_test_split
