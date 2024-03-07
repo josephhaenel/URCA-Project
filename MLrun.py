@@ -18,7 +18,7 @@ def run_all_models(base_directories):
         while True:
             if not os.path.exists(os.path.join('outputs', str(number), 'outputs' + last_part)):
                 os.makedirs(os.path.join('outputs', str(
-                    number), 'outputs' + last_part))
+                    number), 'outputs' + last_part), exist_ok=True)
                 break
             number += 1
         base_output_dir = os.path.join(

@@ -1,15 +1,15 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply
-from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
+from keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply
+from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
 from keras.models import Model
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from keras.preprocessing.image import load_img, img_to_array
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from sklearn.model_selection import train_test_split
 from utils.SaveHistoryToTxt import save_history_to_txt
-from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras import regularizers
+from keras.callbacks import EarlyStopping
+from keras import regularizers
 
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
 from utils.CreateDirectory import _create_directory
@@ -35,7 +35,7 @@ class InceptionResNetV2Model:
         self.dataset_name = dataset_name
         self.model = self._build_model()
         
-    def load_images_and_masks(self, paired_image_paths, target_size=(299, 299)) -> tuple[np.ndarray, np.ndarray, list]:
+    def load_images_and_masks(self, paired_image_paths, target_size=(256, 256)) -> tuple[np.ndarray, np.ndarray, list]:
         combined_images = []
         disease_masks = []
         disease_types = []
@@ -67,7 +67,7 @@ class InceptionResNetV2Model:
 
     def _build_model(self):
         # Input tensor for RGB images and leaf segmentation mask
-        input_tensor = Input(shape=(299, 299, 4))
+        input_tensor = Input(shape=(256, 256, 4))
 
         # Split RGB and mask
         processed_rgb = Lambda(lambda x: x[..., :3])(input_tensor)
@@ -81,7 +81,7 @@ class InceptionResNetV2Model:
         mask_conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(processed_mask)
         mask_conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(mask_conv1)
         
-        mask_conv_resized = Resizing(8, 8)(mask_conv2)
+        mask_conv_resized = Resizing(6, 6)(mask_conv2)
 
         # Combine base_model_rgb output with processed mask features
         combined_features = concatenate([rgb_features, mask_conv_resized])
@@ -142,9 +142,9 @@ class InceptionResNetV2Model:
 
         # Preparing training and validation datasets
         combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(
-            stratified_train_data,  target_size=(299, 299))
+            stratified_train_data,  target_size=(256, 256))
         combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(
-            stratified_val_data,  target_size=(299, 299))
+            stratified_val_data,  target_size=(256, 256))
 
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'InceptionResNetV2', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
         
@@ -153,12 +153,12 @@ class InceptionResNetV2Model:
                         loss=dice_loss,
                         metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
-        # Fits the model on batches with real-time data augmentation
+        # Fit the model
         history = self.model.fit(
                         combined_inputs_train, 
             disease_labels_train, 
             validation_data=(combined_inputs_val, disease_labels_val),
-            epochs=epochs, 
+            epochs=int(epochs / 2), 
             callbacks=[binary_segmentation_metrics, early_stopping]  # Add early_stopping to callbacks
             )
 

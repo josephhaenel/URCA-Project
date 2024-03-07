@@ -1,19 +1,21 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, BatchNormalization, Activation
-from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
-from tensorflow.keras.models import Model
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.losses import BinaryCrossentropy
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from utils.SaveHistoryToTxt import save_history_to_txt
-from sklearn.model_selection import train_test_split
-from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
-from tensorflow.keras.callbacks import LearningRateScheduler, EarlyStopping
 
-from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
+from keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, BatchNormalization, Activation
+from keras.applications.resnet50 import ResNet50, preprocess_input
+from keras.models import Model
+from keras.optimizers import Adam
+from keras.losses import BinaryCrossentropy
+from keras.preprocessing.image import load_img, img_to_array
+from keras.callbacks import LearningRateScheduler, EarlyStopping
+
+from sklearn.model_selection import train_test_split
+
+from utils.SaveHistoryToTxt import save_history_to_txt
+from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from utils.CreateDirectory import _create_directory
+from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
 
 def iou(y_true, y_pred):
     def f(y_true, y_pred):
@@ -34,7 +36,7 @@ class ResNet50Model:
         self.dataset_name = dataset_name
         self.model = self._build_model()
 
-    def load_images_and_masks(self, paired_image_paths, target_size=(224, 224)):
+    def load_images_and_masks(self, paired_image_paths, target_size=(256, 256)):
         combined_images = []
         disease_masks = []
         disease_types = []
@@ -86,7 +88,7 @@ class ResNet50Model:
             layer.trainable = False
 
         # Create new input layer for 6-channel input
-        input_tensor = Input(shape=(224, 224, 6))
+        input_tensor = Input(shape=(256, 256, 6))
 
         # Use a Lambda layer to take only the first 3 channels (RGB) to feed into the ResNet50
         x = Lambda(lambda x: x[:, :, :, :3])(input_tensor)
@@ -105,7 +107,7 @@ class ResNet50Model:
         x = Activation('relu')(x)
         x = UpSampling2D(size=(2, 2))(x)
 
-        x = Resizing(224, 224)(x)
+        x = Resizing(256, 256)(x)
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
 
         
@@ -162,9 +164,9 @@ class ResNet50Model:
 
         # Preparing training and validation datasets
         combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(
-            stratified_train_data, target_size=(224, 224))
+            stratified_train_data, target_size=(256, 256))
         combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(
-            stratified_val_data, target_size=(224, 224))
+            stratified_val_data, target_size=(256, 256))
 
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name='ResNet50', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
         

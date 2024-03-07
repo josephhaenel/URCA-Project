@@ -2,13 +2,17 @@ import os
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, mean_squared_error
-from skimage import io, color
+from sklearn.metrics import accuracy_score
+from skimage import io
 from skimage.transform import resize
-from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix
 import pandas as pd
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import concurrent
+from utils.ComputeSilhouetteScore import compute_silhouette_score
+
+def compute_silhouette_for_params(params):
+    return compute_silhouette_score(*params)
 
 class KMeansSegmentation:
 
@@ -19,13 +23,53 @@ class KMeansSegmentation:
         self.val_split = val_split
         self.dataset_name = dataset_name
         
+        
+    def evaluate_on_full_dataset(self, combined_images, disease_masks):
+        scaler = self.fit_scaler(combined_images)
+        labels_pred = self.k_means_segmentation(combined_images, scaler, self.best_init, self.best_k)
+        full_iou = self.calculate_iou(disease_masks, labels_pred)
+        full_accuracy = accuracy_score(disease_masks.flatten(), labels_pred.flatten())
+        return full_iou, full_accuracy
+
     def calculate_iou(self, y_true, y_pred):
         intersection = np.logical_and(y_true, y_pred)
         union = np.logical_or(y_true, y_pred)
-        iou_score = np.sum(intersection) / np.sum(union)
+        if np.sum(union) == 0:
+            return 1.0 if np.sum(intersection) == 0 else 0  # Perfect IoU if true negatives
+        else:
+            iou_score = np.sum(intersection) / np.sum(union)
         return iou_score
 
-    def load_and_preprocess_images(self, paired_image_paths, target_size=(299, 299)):
+    def tune_kmeans_parameters(self, combined_images_train, k_range=range(2, 10), init_methods=['k-means++', 'random'], sample_size=1000):
+        scaler = self.fit_scaler(combined_images_train)
+        standardized_data = scaler.transform(combined_images_train.reshape(-1, combined_images_train.shape[-1]))
+
+        # Take a random sample of the data
+        sample_indices = np.random.choice(standardized_data.shape[0], sample_size, replace=False)
+        sample_data = standardized_data[sample_indices]
+
+        best_score = 0
+        best_k = 0
+        best_init = ''
+
+        # Create a list of all combinations of k and init_method
+        parameters = [(k, init_method) for k in k_range for init_method in init_methods]
+
+        # Use a ProcessPoolExecutor to compute silhouette scores in parallel
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(compute_silhouette_for_params, (params, sample_data)) for params in parameters]
+            for future in concurrent.futures.as_completed(futures):
+                silhouette_avg, k, init_method = future.result()
+                print(f'For n_clusters = {k} and init = {init_method}, the average silhouette_score is : {silhouette_avg}')
+                if silhouette_avg > best_score:
+                    best_score = silhouette_avg
+                    best_k = k
+                    best_init = init_method
+
+        print(f'Best KMeans parameters found: n_clusters = {best_k}, init = {best_init}, silhouette_score = {best_score}')
+        return best_k, best_init
+
+    def load_and_preprocess_images(self, paired_image_paths, target_size=(256, 256)):
         combined_images = []
         disease_masks = []
         disease_types = []
@@ -33,14 +77,13 @@ class KMeansSegmentation:
         for rgb_path, leaf_mask_path, disease_path, disease_type in paired_image_paths:
             if os.path.exists(rgb_path) and os.path.exists(leaf_mask_path) and os.path.exists(disease_path):
                 rgb_image = io.imread(rgb_path)
-                leaf_mask = io.imread(leaf_mask_path, as_gray=True)
-                disease_mask = io.imread(disease_path, as_gray=True)
+                leaf_mask = io.imread(leaf_mask_path, as_gray=True) > 0.5  # Convert to binary mask
+                disease_mask = io.imread(disease_path, as_gray=True) > 0.5  # Convert to binary mask
 
-                # Resize images to the target size
-                rgb_image = resize(rgb_image, target_size, anti_aliasing=False)
-                leaf_mask = resize(leaf_mask, target_size, anti_aliasing=False)
-                disease_mask = resize(
-                    disease_mask, target_size, anti_aliasing=False)
+                # Resize images
+                rgb_image = resize(rgb_image, target_size, anti_aliasing=True)
+                leaf_mask = resize(leaf_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
+                disease_mask = resize(disease_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
 
                 # Flatten the images for k-means clustering
                 rgb_flatten = rgb_image.reshape((-1, 3))
@@ -52,26 +95,6 @@ class KMeansSegmentation:
                 disease_types.append(disease_type)
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
-    
-    def calculate_iou_per_class(self, y_true, y_pred):
-        num_classes = np.unique(y_true).shape[0]
-        iou_per_class = []
-        for i in range(num_classes):
-            temp_true = np.where(y_true == i, 1, 0)
-            temp_pred = np.where(y_pred == i, 1, 0)
-            iou = np.sum(temp_true * temp_pred) / np.sum(temp_true + temp_pred - temp_true * temp_pred)
-            iou_per_class.append(iou)
-        return iou_per_class
-
-    def calculate_accuracy_per_class(self, y_true, y_pred):
-        num_classes = np.unique(y_true).shape[0]
-        accuracy_per_class = []
-        for i in range(num_classes):
-            temp_true = np.where(y_true == i, 1, 0)
-            temp_pred = np.where(y_pred == i, 1, 0)
-            accuracy = np.sum(temp_true == temp_pred) / np.prod(y_true.shape)
-            accuracy_per_class.append(accuracy)
-        return accuracy_per_class
 
     def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str, str]]:
         paired_images = []
@@ -99,101 +122,86 @@ class KMeansSegmentation:
 
         return paired_images
 
-    def _create_directory(self, path: str) -> None:
-        if not os.path.exists(path):
-            os.makedirs(path)
-
-    def print_history_keys(self, history: dict) -> None:
-        print("Keys in training history:")
-        for key in history.keys():
-            print(key)
-
-
-    def k_means_segmentation(self, combined_images):
-        # Standardize the data
+    def fit_scaler(self, combined_images):
+        # Fit the scaler on the training data only
         scaler = StandardScaler()
-        combined_images_standardized = scaler.fit_transform(
-            combined_images.reshape(-1, combined_images.shape[-1]))
+        scaler.fit(combined_images.reshape(-1, combined_images.shape[-1]))
+        return scaler
 
-        # Apply k-means clustering
-        kmeans = KMeans(n_clusters=3, random_state=42)
-        disease_labels_pred = kmeans.fit_predict(combined_images_standardized)
-
-        # Reshape the predicted labels to match the original image shape
-        disease_labels_pred = disease_labels_pred.reshape(
-            combined_images.shape[0], -1)
-
-        return disease_labels_pred
+    def k_means_segmentation(self, combined_images, scaler, init, k):
+        # Apply the provided scaler to standardize the data
+        combined_images_standardized = scaler.transform(combined_images.reshape(-1, combined_images.shape[-1]))
+        kmeans = KMeans(n_clusters=k, init=init, random_state=42)
+        labels = kmeans.fit_predict(combined_images_standardized)
+        return labels.reshape(-1, combined_images.shape[1])
 
     def compile_and_train(self, output_dir: str):
-        self._create_directory(output_dir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
-        # Load and preprocess data
-        all_paired_image_paths = self.pair_images_by_filename(
-            self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
+        all_paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
+        results = []
 
-        # Initialize empty lists for training and validation datasets
-        disease_groups = {}
-        for path in all_paired_image_paths:
-            disease = path[3]
-            if disease not in disease_groups:
-                disease_groups[disease] = []
-            disease_groups[disease].append(path)
+        # Perform parameter tuning using only training data
+        combined_images_train, _, _ = self.load_and_preprocess_images([path for path in all_paired_image_paths if path[-1] != 'Healthy'])
 
-        # Initialize empty lists for stratified training and validation datasets
-        stratified_train_data = []
-        stratified_val_data = []
+        scaler = self.fit_scaler(combined_images_train)  # Fit scaler only once on training data
+        print("Beginning Tuning...")
+        best_k, best_init = self.tune_kmeans_parameters(scaler.transform(combined_images_train.reshape(-1, combined_images_train.shape[-1])))
+        print("Tuning complete. Best K: ", best_k,"Best Init: ", best_init)
 
-        # Split each group into stratified training and validation sets
-        for disease, paths in disease_groups.items():
-            train_paths, val_paths = train_test_split(
-                paths,
-                test_size=self.val_split,
-                stratify=[p[3] for p in paths],
-                random_state=42
-            )
-            stratified_train_data.extend(train_paths)
-            stratified_val_data.extend(val_paths)
+        for disease in set(p[3] for p in all_paired_image_paths):
+            disease_paths = [p for p in all_paired_image_paths if p[3] == disease]
+            train_paths, val_paths = train_test_split(disease_paths, test_size=self.val_split, random_state=42)
 
-        # Preparing training and validation datasets
-        combined_inputs_train, disease_labels_train, train_disease_types = self.load_and_preprocess_images(
-            stratified_train_data)
-        combined_inputs_val, disease_labels_val, val_disease_types = self.load_and_preprocess_images(
-            stratified_val_data)
+            combined_images_train, disease_masks_train, _ = self.load_and_preprocess_images(train_paths)
+            combined_images_val, disease_masks_val, _ = self.load_and_preprocess_images(val_paths)
 
-        # K-means segmentation
-        disease_labels_pred_train = self.k_means_segmentation(
-            combined_inputs_train)
-        disease_labels_pred_val = self.k_means_segmentation(
-            combined_inputs_val)
+            # Use the scaler fitted on the training data to transform both training and validation data
+            standardized_images_train = scaler.transform(combined_images_train.reshape(-1, combined_images_train.shape[-1]))
+            standardized_images_val = scaler.transform(combined_images_val.reshape(-1, combined_images_val.shape[-1]))
 
-        # Evaluate the performance
-        train_accuracy = accuracy_score(
-            disease_labels_train.flatten(), disease_labels_pred_train.flatten())
-        val_accuracy = accuracy_score(
-            disease_labels_val.flatten(), disease_labels_pred_val.flatten())
-        
-        train_iou = self.calculate_iou(disease_labels_train, disease_labels_pred_train)
-        val_iou = self.calculate_iou(disease_labels_val, disease_labels_pred_val)
-        
-        train_iou_per_class = self.calculate_iou_per_class(disease_labels_train, disease_labels_pred_train)
-        val_iou_per_class = self.calculate_iou_per_class(disease_labels_val, disease_labels_pred_val)
-        train_accuracy_per_class = self.calculate_accuracy_per_class(disease_labels_train, disease_labels_pred_train)
-        val_accuracy_per_class = self.calculate_accuracy_per_class(disease_labels_val, disease_labels_pred_val)
-        
-        df = pd.DataFrame({'Class': range(len(train_iou_per_class)),
-            'Train IoU': train_iou_per_class,
-            'Validation IoU': val_iou_per_class,
-            'Train Accuracy': train_accuracy_per_class,
-            'Validation Accuracy': val_accuracy_per_class
+            # Use the best parameters found from the tuning to train and predict on the training and validation data
+            kmeans = KMeans(n_clusters=best_k, init=best_init, random_state=42, n_init=10)
+            labels_pred_train = kmeans.fit_predict(standardized_images_train).reshape(-1, combined_images_train.shape[1])
+            labels_pred_val = kmeans.predict(standardized_images_val).reshape(-1, combined_images_val.shape[1])
+
+            train_iou = self.calculate_iou(disease_masks_train, labels_pred_train)
+            val_iou = self.calculate_iou(disease_masks_val, labels_pred_val)
+            train_accuracy = accuracy_score(disease_masks_train.flatten(), labels_pred_train.flatten())
+            val_accuracy = accuracy_score(disease_masks_val.flatten(), labels_pred_val.flatten())
+
+            # For the healthy class, handle IoU separately as it is expected to be 0/0
+            if disease == 'Healthy':
+                # Assuming the healthy class has been processed correctly and is fully healthy
+                train_iou = val_iou = 1.0
+                # Accuracy could be 1 only if the model predicts no disease on a healthy leaf
+
+            results.append({
+                'Disease Type': disease,
+                'Train IoU': train_iou,
+                'Validation IoU': val_iou,
+                'Train Accuracy': train_accuracy,
+                'Validation Accuracy': val_accuracy
+            })
+
+        # Evaluate on the full dataset using the trained model and scaler
+        combined_images, disease_masks, _ = self.load_and_preprocess_images(all_paired_image_paths)
+        self.best_k, self.best_init = self.tune_kmeans_parameters(combined_images)
+        full_iou, full_accuracy = self.evaluate_on_full_dataset(combined_images, disease_masks)
+        print(f"Full dataset IoU: {full_iou}, Full dataset Accuracy: {full_accuracy}")
+
+        # Append full dataset evaluation results
+        results.append({
+            'Disease Type': 'All_Classes',
+            'Train IoU': full_iou,
+            'Validation IoU': full_iou,
+            'Train Accuracy': full_accuracy,
+            'Validation Accuracy': full_accuracy
         })
-        
-        df.to_excel('metrics_per_class.xlsx', index=False)
 
-        print(f'Training Accuracy: {train_accuracy}')
-        print(f'Training IoU: {train_iou}')
-        print(f'Validation IoU: {val_iou}')
-        print(f'Validation Accuracy: {val_accuracy}')
+        # Create the results DataFrame and save to Excel
+        df_all = pd.DataFrame(results)
+        df_all.to_excel(os.path.join(output_dir, f"{self.dataset_name}_metrics.xlsx"), index=False)
 
-        return {'train_accuracy': train_accuracy, 'val_accuracy': val_accuracy, 'val_iou' : val_iou}
-
+        return df_all

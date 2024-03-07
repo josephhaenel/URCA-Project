@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import os
 import pandas as pd
-from tensorflow.keras.callbacks import Callback
+from keras.callbacks import Callback
 
 class BinarySegmentationMetrics(Callback):
     def __init__(self, validation_data, validation_disease_types, model_name, learning_rate, val_split, dataset_name, output_dir):
