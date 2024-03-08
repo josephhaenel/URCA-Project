@@ -8,6 +8,7 @@ from keras.models import Model
 from keras.preprocessing.image import load_img, img_to_array
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, LearningRateScheduler
+from keras.activations import ReLuActivation
 
 from sklearn.model_selection import train_test_split
 
@@ -93,7 +94,7 @@ class AlexNetModel:
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
 
     def _build_model(self) -> Model:
-        input_tensor = Input(shape=(256, 256, 6))
+        input_tensor = Input(shape=(None, None, 6))
 
         # Extract RGB and mask channels from the input
         processed_rgb = Lambda(lambda x: x[:, :, :, :3])(input_tensor)
@@ -124,16 +125,14 @@ class AlexNetModel:
         x = squeeze_excite_block(x)
 
         x = Conv2D(256, (3, 3), padding='same', kernel_regularizer=l2(0.01))(x)
-        x = LeakyReLU(alpha=0.1)(x)
+        x = ReLuActivation(alpha=0.1)(x)
         x = SpatialDropout2D(0.5)(x)
         x = BatchNormalization()(x)
         x = MaxPooling2D((3, 3), strides=2)(x)
-
         # Upsampling
         x = UpSampling2D(size=(2, 2))(x)
         x = Conv2D(128, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
         x = UpSampling2D(size=(2, 2))(x)
-        x = Resizing(256, 256)(x)
 
         # Combine features with the mask
         combined = concatenate([x, processed_mask])

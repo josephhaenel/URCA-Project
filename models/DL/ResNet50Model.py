@@ -16,6 +16,8 @@ from utils.SaveHistoryToTxt import save_history_to_txt
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from utils.CreateDirectory import _create_directory
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
+from keras.preprocessing.image import ImageDataGenerator
+
 
 def iou(y_true, y_pred):
     def f(y_true, y_pred):
@@ -25,6 +27,19 @@ def iou(y_true, y_pred):
         x = x.astype(np.float32)
         return x
     return tf.numpy_function(f, [y_true, y_pred], tf.float32)
+
+def create_augmenter():
+    return ImageDataGenerator(
+        rotation_range=10,
+        width_shift_range=0.1,
+        height_shift_range=0.1,
+        shear_range=0.1,
+        zoom_range=0.1,
+        horizontal_flip=True,
+        fill_mode='nearest'
+    )
+
+
 
 class ResNet50Model:
     def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], learning_rate: float, val_split: float, dataset_name: str) -> None:
@@ -170,6 +185,18 @@ class ResNet50Model:
 
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name='ResNet50', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
         
+        augmenter = create_augmenter()
+
+        def train_generator(data_generator, images, masks):
+            seed = 1  # Ensuring that image and mask undergo the same transformation
+            image_gen = data_generator.flow(images, batch_size=batch_size, seed=seed)
+            mask_gen = data_generator.flow(masks, batch_size=batch_size, seed=seed)
+            
+            while True:
+                yield next(image_gen), next(mask_gen)
+
+        train_gen = train_generator(augmenter, combined_inputs_train, disease_labels_train)
+
         # Model compilation
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
                         loss=BinaryCrossentropy(),
@@ -177,8 +204,7 @@ class ResNet50Model:
 
         # Model training
         history = self.model.fit(
-            combined_inputs_train, 
-            disease_labels_train, 
+            train_gen,
             validation_data=(combined_inputs_val, disease_labels_val),
             epochs=epochs, 
             batch_size=batch_size,

@@ -1,6 +1,8 @@
 import os
 import numpy as np
 import tensorflow as tf
+import math
+from keras.callbacks import LearningRateScheduler
 from keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply
 from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
 from keras.models import Model
@@ -10,6 +12,7 @@ from sklearn.model_selection import train_test_split
 from utils.SaveHistoryToTxt import save_history_to_txt
 from keras.callbacks import EarlyStopping
 from keras import regularizers
+from keras.preprocessing.image import ImageDataGenerator
 
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
 from utils.CreateDirectory import _create_directory
@@ -23,6 +26,13 @@ def dice_loss(y_true, y_pred, smooth=1):
     union = tf.reduce_sum(y_true, axis=[1,2,3]) + tf.reduce_sum(y_pred, axis=[1,2,3])
     dice = tf.reduce_mean((2. * intersection + smooth)/(union + smooth), axis=0)
     return 1 - dice
+
+def step_decay(epoch):
+    initial_lrate = self.learning_rate
+    drop = 0.5
+    epochs_drop = 10.0
+    lrate = initial_lrate * math.pow(drop, math.floor((1+epoch)/epochs_drop))
+    return lrate
 
 class InceptionResNetV2Model: 
 
@@ -67,7 +77,7 @@ class InceptionResNetV2Model:
 
     def _build_model(self):
         # Input tensor for RGB images and leaf segmentation mask
-        input_tensor = Input(shape=(256, 256, 4))
+        input_tensor = Input(shape=(None, None, 4))
 
         # Split RGB and mask
         processed_rgb = Lambda(lambda x: x[..., :3])(input_tensor)
@@ -98,7 +108,6 @@ class InceptionResNetV2Model:
         x = Conv2D(256, (3, 3), activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.01))(x)
         x = tf.keras.layers.Dropout(0.5)(x)  # Add another dropout layer
         x = UpSampling2D(size=(2, 2))(x)
-        x = Resizing(256, 256)(x)
 
         # Final output layer for disease segmentation
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
@@ -113,6 +122,9 @@ class InceptionResNetV2Model:
 
         # Create EarlyStopping callback
         early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=25)
+
+        # Create LearningRateScheduler callback
+        lrate_scheduler = LearningRateScheduler(step_decay)
 
         # Load and preprocess data
         all_paired_image_paths = pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
@@ -147,7 +159,21 @@ class InceptionResNetV2Model:
             stratified_val_data,  target_size=(256, 256))
 
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'InceptionResNetV2', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
+
+        data_gen_args = dict(rotation_range=90, width_shift_range=0.1, height_shift_range=0.1, shear_range=0.2, zoom_range=0.2, horizontal_flip=True, vertical_flip=True, fill_mode='nearest')
         
+        image_datagen = ImageDataGenerator(**data_gen_args)
+        mask_datagen = ImageDataGenerator(**data_gen_args)
+
+        seed = 1
+        image_datagen.fit(combined_inputs_train, augment=True, seed=seed)
+        mask_datagen.fit(disease_labels_train, augment=True, seed=seed)
+
+        image_generator = image_datagen.flow(combined_inputs_train, batch_size=batch_size, seed=seed)
+        mask_generator = mask_datagen.flow(disease_labels_train, batch_size=batch_size, seed=seed)
+
+        train_generator = zip(image_generator, mask_generator)
+
         # Model compilation
         self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
                         loss=dice_loss,
@@ -155,12 +181,11 @@ class InceptionResNetV2Model:
 
         # Fit the model
         history = self.model.fit(
-                        combined_inputs_train, 
-            disease_labels_train, 
-            validation_data=(combined_inputs_val, disease_labels_val),
-            epochs=int(epochs / 2), 
-            callbacks=[binary_segmentation_metrics, early_stopping]  # Add early_stopping to callbacks
-            )
+            train_generator,
+            steps_per_epoch=len(combined_inputs_train) // batch_size,
+            epochs=int(epochs),
+            callbacks=[binary_segmentation_metrics, early_stopping, lrate_scheduler]  
+        )
 
         # Unfreeze all layers
         for layer in self.model.layers:
@@ -173,20 +198,15 @@ class InceptionResNetV2Model:
 
         # Fit the model again
         history = self.model.fit(
-                        combined_inputs_train, 
-            disease_labels_train, 
+            train_generator, 
             validation_data=(combined_inputs_val, disease_labels_val),
-            epochs=epochs, 
-            callbacks=[binary_segmentation_metrics, early_stopping]  # Add early_stopping to callbacks
+            epochs=int(epochs), 
+            batch_size=batch_size,
+            callbacks=[binary_segmentation_metrics, early_stopping, lrate_scheduler]  
             )
-        
         binary_segmentation_metrics.save_results_to_excel()
 
         # Save the model and training history
         save_history_to_txt(history, output_dir)
 
         return history
-
-
-
-

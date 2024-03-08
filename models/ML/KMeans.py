@@ -10,8 +10,8 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import concurrent
 from utils.ComputeSilhouetteScore import compute_silhouette_score
-from ML.MachineLearningUtils.PairImagesByFilename import pair_images_by_filename
-from ML.MachineLearningUtils.calculate_iou import calculate_iou
+from models.ML.MachineLearningUtils.PairImagesByFilename import pair_images_by_filename
+from models.ML.MachineLearningUtils.calculate_iou import calculate_iou
 
 def compute_silhouette_for_params(params):
     return compute_silhouette_score(*params)
@@ -29,7 +29,7 @@ class KMeansSegmentation:
     def evaluate_on_full_dataset(self, combined_images, disease_masks):
         scaler = self.fit_scaler(combined_images)
         labels_pred = self.k_means_segmentation(combined_images, scaler, self.best_init, self.best_k)
-        full_iou = self.calculate_iou(disease_masks, labels_pred)
+        full_iou = calculate_iou(disease_masks, labels_pred)
         full_accuracy = accuracy_score(disease_masks.flatten(), labels_pred.flatten())
         return full_iou, full_accuracy
 
@@ -73,21 +73,25 @@ class KMeansSegmentation:
                 leaf_mask = io.imread(leaf_mask_path, as_gray=True) > 0.5  # Convert to binary mask
                 disease_mask = io.imread(disease_path, as_gray=True) > 0.5  # Convert to binary mask
 
-                # Resize images
-                rgb_image = resize(rgb_image, target_size, anti_aliasing=True)
-                leaf_mask = resize(leaf_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
-                disease_mask = resize(disease_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
+                # Resize the images and masks
+                rgb_image_resized = resize(rgb_image, target_size, anti_aliasing=True)
+                leaf_mask_resized = resize(leaf_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
+                disease_mask_resized = resize(disease_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
 
-                # Flatten the images
-                rgb_flatten = rgb_image.reshape((-1, 3))
-                leaf_flatten = leaf_mask.flatten()
+                # Flatten the images and masks
+                rgb_flatten = rgb_image_resized.reshape((-1, 3))
+                leaf_flatten = leaf_mask_resized.flatten()
+                disease_flatten = disease_mask_resized.flatten()  # You might need this for IOU calculation
+
+                # Stack the flattened rgb and leaf mask arrays
                 combined_image = np.column_stack((rgb_flatten, leaf_flatten))
 
                 combined_images.append(combined_image)
-                disease_masks.append(disease_mask.flatten())
+                disease_masks.append(disease_flatten)
                 disease_types.append(disease_type)
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
+
 
     def fit_scaler(self, combined_images):
         # Fit the scaler on the training data only
@@ -106,7 +110,7 @@ class KMeansSegmentation:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        all_paired_image_paths = self.pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
+        all_paired_image_paths = pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
         results = []
 
         # Perform parameter tuning using only training data
@@ -119,7 +123,12 @@ class KMeansSegmentation:
 
         for disease in set(p[3] for p in all_paired_image_paths):
             disease_paths = [p for p in all_paired_image_paths if p[3] == disease]
-            train_paths, val_paths = train_test_split(disease_paths, test_size=self.val_split, random_state=42)
+            
+            # Extract the labels for the current disease to use for stratification
+            labels = [p[3] for p in disease_paths]
+
+            # Split the data
+            train_paths, val_paths = train_test_split(disease_paths, test_size=self.val_split, stratify=labels, random_state=42)
 
             combined_images_train, disease_masks_train, _ = self.load_and_preprocess_images(train_paths)
             combined_images_val, disease_masks_val, _ = self.load_and_preprocess_images(val_paths)
@@ -133,8 +142,8 @@ class KMeansSegmentation:
             labels_pred_train = kmeans.fit_predict(standardized_images_train).reshape(-1, combined_images_train.shape[1])
             labels_pred_val = kmeans.predict(standardized_images_val).reshape(-1, combined_images_val.shape[1])
 
-            train_iou = self.calculate_iou(disease_masks_train, labels_pred_train)
-            val_iou = self.calculate_iou(disease_masks_val, labels_pred_val)
+            train_iou = calculate_iou(disease_masks_train, labels_pred_train)
+            val_iou = calculate_iou(disease_masks_val, labels_pred_val)
             train_accuracy = accuracy_score(disease_masks_train.flatten(), labels_pred_train.flatten())
             val_accuracy = accuracy_score(disease_masks_val.flatten(), labels_pred_val.flatten())
 

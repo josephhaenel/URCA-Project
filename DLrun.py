@@ -39,7 +39,7 @@ def run_all_models(base_directories):
             print(f"Failed to run AlexNet model: {e}")
         
         try:
-            InceptionResNetV2_learning_rate = 0.001 # 0.001, 0.0001
+            InceptionResNetV2_learning_rate = 0.0001 # 0.001, 0.0001
             InceptionResNetV2_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
             
             # Run Inception ResNet V2 Model
@@ -51,7 +51,7 @@ def run_all_models(base_directories):
             
             
         try:
-            ResNet50_learning_rate = 0.001 # 0.001, 0.0001
+            ResNet50_learning_rate = 0.0001 # 0.001, 0.0001
             ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
             
             # Run ResNet50 Model
