@@ -10,6 +10,8 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import concurrent
 from utils.ComputeSilhouetteScore import compute_silhouette_score
+from ML.MachineLearningUtils.PairImagesByFilename import pair_images_by_filename
+from ML.MachineLearningUtils.calculate_iou import calculate_iou
 
 def compute_silhouette_for_params(params):
     return compute_silhouette_score(*params)
@@ -30,15 +32,6 @@ class KMeansSegmentation:
         full_iou = self.calculate_iou(disease_masks, labels_pred)
         full_accuracy = accuracy_score(disease_masks.flatten(), labels_pred.flatten())
         return full_iou, full_accuracy
-
-    def calculate_iou(self, y_true, y_pred):
-        intersection = np.logical_and(y_true, y_pred)
-        union = np.logical_or(y_true, y_pred)
-        if np.sum(union) == 0:
-            return 1.0 if np.sum(intersection) == 0 else 0  # Perfect IoU if true negatives
-        else:
-            iou_score = np.sum(intersection) / np.sum(union)
-        return iou_score
 
     def tune_kmeans_parameters(self, combined_images_train, k_range=range(2, 10), init_methods=['k-means++', 'random'], sample_size=1000):
         scaler = self.fit_scaler(combined_images_train)
@@ -85,7 +78,7 @@ class KMeansSegmentation:
                 leaf_mask = resize(leaf_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
                 disease_mask = resize(disease_mask, target_size, anti_aliasing=False, order=0, preserve_range=True)
 
-                # Flatten the images for k-means clustering
+                # Flatten the images
                 rgb_flatten = rgb_image.reshape((-1, 3))
                 leaf_flatten = leaf_mask.flatten()
                 combined_image = np.column_stack((rgb_flatten, leaf_flatten))
@@ -95,32 +88,6 @@ class KMeansSegmentation:
                 disease_types.append(disease_type)
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
-
-    def pair_images_by_filename(self, base_rgb_dir: str, base_disease_dir: str, base_leaf_dir: str) -> list[tuple[str, str, str, str]]:
-        paired_images = []
-        for disease in os.listdir(base_rgb_dir):
-            rgb_dir = os.path.join(base_rgb_dir, disease)
-            disease_dir = os.path.join(base_disease_dir, disease)
-            leaf_dir = os.path.join(base_leaf_dir, disease)
-
-            if not os.path.isdir(rgb_dir) or not os.path.isdir(disease_dir) or not os.path.isdir(leaf_dir):
-                print(
-                    f"One of the directories is invalid: {rgb_dir}, {disease_dir}, {leaf_dir}")
-                continue
-
-            for file_name in os.listdir(rgb_dir):
-                if file_name.endswith('.png'):
-                    rgb_path = os.path.join(rgb_dir, file_name)
-                    disease_path = os.path.join(disease_dir, file_name)
-                    leaf_path = os.path.join(leaf_dir, file_name)
-
-                    if os.path.exists(rgb_path) and os.path.exists(disease_path) and os.path.exists(leaf_path):
-                        paired_images.append(
-                            (rgb_path, leaf_path, disease_path, disease))
-                    else:
-                        print(f"Missing image for {file_name} in {disease}")
-
-        return paired_images
 
     def fit_scaler(self, combined_images):
         # Fit the scaler on the training data only
