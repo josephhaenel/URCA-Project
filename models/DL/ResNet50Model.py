@@ -60,29 +60,25 @@ class ResNet50Model:
             if all(os.path.exists(p) and p.endswith('.png') for p in [rgb_path, leaf_path, disease_path]):
                 # Load RGB image and preprocess
                 rgb_image = img_to_array(load_img(rgb_path, target_size=target_size, color_mode='rgb')) / 255.0
-
+                
                 # Load leaf mask, preprocess, and expand dimensions if necessary
                 leaf_mask = img_to_array(load_img(leaf_path, target_size=target_size, color_mode='grayscale')) / 255.0
                 if leaf_mask.ndim == 2:
                     leaf_mask = np.expand_dims(leaf_mask, axis=-1)
 
-                # Check if RGB and leaf mask have the same number of channels
-                if rgb_image.shape[-1] == leaf_mask.shape[-1]:
-                    # Combine RGB image and leaf mask
-                    combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)  # Combine along the channel axis
-                else:
-                    # Expand leaf mask to match RGB image's channel dimension
-                    expanded_leaf_mask = np.tile(leaf_mask, (1, 1, rgb_image.shape[-1]))
-                    # Combine RGB image and expanded leaf mask
-                    combined_image = np.concatenate([rgb_image, expanded_leaf_mask], axis=-1)
+                # Combine RGB image and leaf mask along the channel axis
+                combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
 
+
+                combined_images.append(combined_image)
+                
                 # Load and preprocess disease mask
                 disease_mask = img_to_array(load_img(disease_path, target_size=target_size, color_mode='grayscale'))
                 disease_mask = np.where(disease_mask > 127, 1, 0)
-                disease_mask = np.expand_dims(disease_mask, axis=-1)
+                if disease_mask.ndim == 2:  # Check if disease_mask is 2D
+                    disease_mask = np.expand_dims(disease_mask, axis=-1)  # Add a single channel dimension to make it 3D
 
                 # Append to lists
-                combined_images.append(combined_image)
                 disease_masks.append(disease_mask)
                 disease_types.append(disease_type)
             else:
@@ -93,6 +89,7 @@ class ResNet50Model:
         combined_images = preprocess_input(combined_images)  # Use ResNet50 preprocessing
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
+
 
     def _build_model(self) -> Model:
         # Load pre-trained ResNet50 model without top layers

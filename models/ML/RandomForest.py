@@ -135,7 +135,7 @@ class ImageRandomForestSegmenter:
         combined_images, disease_masks, disease_types = self.load_and_preprocess_images(all_paired_image_paths)
         
         # Split the data into training and validation sets
-        combined_images_train, combined_images_val, disease_masks_train, disease_masks_val = train_test_split(combined_images, disease_masks, test_size=self.val_split, random_state=42)
+        combined_images_train, combined_images_val, disease_masks_train, disease_masks_val, disease_types_train, disease_types_val = train_test_split(combined_images, disease_masks, disease_types, test_size=self.val_split, random_state=42)
 
         # Fit the scaler on the training data
         scaler = self.fit_scaler(combined_images_train)
@@ -160,9 +160,9 @@ class ImageRandomForestSegmenter:
         })
 
         # Evaluate performance for each disease type
-        for disease in set(disease_types):
+        for disease in set(disease_types_val):
             # Filter the validation set for the current disease type
-            idx = np.where(np.array(disease_types) == disease)[0]
+            idx = np.where(np.array(disease_types_val) == disease)[0]
             disease_masks_specific = disease_masks_val[idx]
             labels_pred_specific = labels_pred_val[idx]
 

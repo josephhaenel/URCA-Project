@@ -19,24 +19,24 @@ def run_all_models(base_directories):
         last_part = os.path.basename(base_dir)
         number = 1
         while True:
-            if not os.path.exists(os.path.join('outputs', str(number), 'outputs' + last_part)):
-                os.makedirs(os.path.join('outputs', str(number), 'outputs' + last_part))
+            if not os.path.exists(os.path.join('DL_outputs', str(number), 'outputs' + last_part)):
+                os.makedirs(os.path.join('DL_outputs', str(number), 'outputs' + last_part))
                 break
             number += 1    
-        base_output_dir = os.path.join('outputs', str(number), 'outputs' + last_part)
+        base_output_dir = os.path.join('DL_outputs', str(number), 'outputs' + last_part)
         
-        infoPath = os.path.join('outputs', str(number), 'info.txt')
+        infoPath = os.path.join('DL_outputs', str(number), 'info.txt')
         
-        try:
-            AlexNet_learning_rate = 0.0001 # 0.00001, 0.0000001
-            AlexNet_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
+        # try:
+        #     AlexNet_learning_rate = 0.0001 # 0.00001, 0.0000001
+        #     AlexNet_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
             
-            # Run AlexNet Model
-            alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
-            alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir, AlexNet_learning_rate, AlexNet_val_split, last_part)
-            alexnet_history = alexnet_model.compile_and_train(epochs=30, batch_size=32, output_dir=alexnet_output_dir)
-        except Exception as e:
-            print(f"Failed to run AlexNet model: {e}")
+        #     # Run AlexNet Model
+        #     alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
+        #     alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir, AlexNet_learning_rate, AlexNet_val_split, last_part)
+        #     alexnet_history = alexnet_model.compile_and_train(epochs=30, batch_size=32, output_dir=alexnet_output_dir)
+        # except Exception as e:
+        #     print(f"Failed to run AlexNet model: {e}")
         
         try:
             InceptionResNetV2_learning_rate = 0.0001 # 0.001, 0.0001
@@ -50,22 +50,22 @@ def run_all_models(base_directories):
             print(f"Failed to run InceptionResNetV2 model: {e}")
             
             
-        try:
-            ResNet50_learning_rate = 0.0001 # 0.001, 0.0001
-            ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
+        # try:
+        #     ResNet50_learning_rate = 0.0001 # 0.001, 0.0001
+        #     ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
             
-            # Run ResNet50 Model
-            resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
-            resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, ResNet50_learning_rate, ResNet50_val_split, last_part)
-            resnet50_history = resnet50_model.compile_and_train(epochs=100, batch_size=32, output_dir=resnet50_output_dir)
-        except Exception as e:
-            print(f"Failed to run ResNet50 model: {e}")
+        #     # Run ResNet50 Model
+        #     resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
+        #     resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, ResNet50_learning_rate, ResNet50_val_split, last_part)
+        #     resnet50_history = resnet50_model.compile_and_train(epochs=100, batch_size=32, output_dir=resnet50_output_dir)
+        # except Exception as e:
+        #     print(f"Failed to run ResNet50 model: {e}")
         
-        with open(infoPath, "w") as f:
-            # Write learning rate and validation split to info.txt file
-            f.write("ResNet50 learningRate = " + str(ResNet50_learning_rate) + "\n" + "ResNet50 valSplit = " + str(ResNet50_val_split))
-            f.write("AlexNet learningRate = " + str(AlexNet_learning_rate) + "\n" + "AlexNet valSplit = " + str(AlexNet_val_split))
-            f.write("InceptionResNetV2 learningRate = " + str(InceptionResNetV2_learning_rate) + "\n" + "InceptionResNetV2 valSplit = " + str(InceptionResNetV2_val_split))
+        # with open(infoPath, "w") as f:
+        #     # Write learning rate and validation split to info.txt file
+        #     f.write("ResNet50 learningRate = " + str(ResNet50_learning_rate) + "\n" + "ResNet50 valSplit = " + str(ResNet50_val_split))
+        #     f.write("AlexNet learningRate = " + str(AlexNet_learning_rate) + "\n" + "AlexNet valSplit = " + str(AlexNet_val_split))
+        #     f.write("InceptionResNetV2 learningRate = " + str(InceptionResNetV2_learning_rate) + "\n" + "InceptionResNetV2 valSplit = " + str(InceptionResNetV2_val_split))
     
     
     # send_email(

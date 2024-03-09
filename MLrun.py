@@ -16,13 +16,13 @@ def run_all_models(base_directories):
         last_part = os.path.basename(base_dir)
         number = 1
         while True:
-            if not os.path.exists(os.path.join('outputs', str(number), 'outputs' + last_part)):
-                os.makedirs(os.path.join('outputs', str(
+            if not os.path.exists(os.path.join('ML_outputs', str(number), 'outputs' + last_part)):
+                os.makedirs(os.path.join('ML_outputs', str(
                     number), 'outputs' + last_part), exist_ok=True)
                 break
             number += 1
         base_output_dir = os.path.join(
-            'outputs', str(number), 'outputs' + last_part)
+            'ML_outputs', str(number), 'outputs' + last_part)
         try:
             RandomForest_output_dir = os.path.join(base_output_dir, 'RandomForest')
             RandomForest_Algorithm = ImageRandomForestSegmenter(base_rgb_dir, base_disease_dir, base_leaf_dir, val_split=0.2, dataset_name=last_part)

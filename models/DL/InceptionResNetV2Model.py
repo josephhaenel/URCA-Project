@@ -27,8 +27,8 @@ def dice_loss(y_true, y_pred, smooth=1):
     dice = tf.reduce_mean((2. * intersection + smooth)/(union + smooth), axis=0)
     return 1 - dice
 
-def step_decay(epoch):
-    initial_lrate = self.learning_rate
+def step_decay(epoch, learning_rate):
+    initial_lrate = learning_rate
     drop = 0.5
     epochs_drop = 10.0
     lrate = initial_lrate * math.pow(drop, math.floor((1+epoch)/epochs_drop))
@@ -63,12 +63,15 @@ class InceptionResNetV2Model:
                     raise ValueError(f"Leaf mask should have one channel. Found shape: {leaf_mask.shape}")
                 
                 combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
+                
                 combined_images.append(combined_image)
                 
                 disease_mask = img_to_array(load_img(disease_path, target_size=(256, 256), color_mode='grayscale'))
                 
                 disease_mask = np.where(disease_mask > 127, 1, 0)
-                disease_mask = np.expand_dims(disease_mask, axis=-1)  # Ensure disease mask has a single channel
+                if disease_mask.ndim == 2:  # Check if disease_mask is 2D
+                    disease_mask = np.expand_dims(disease_mask, axis=-1)  # Add a single channel dimension to make it 3D
+            
                 disease_masks.append(disease_mask)
                 
                 disease_types.append(disease_type)
@@ -108,6 +111,8 @@ class InceptionResNetV2Model:
         x = Conv2D(256, (3, 3), activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.01))(x)
         x = tf.keras.layers.Dropout(0.5)(x)  # Add another dropout layer
         x = UpSampling2D(size=(2, 2))(x)
+        
+        x = Resizing(256, 256)(x) 
 
         # Final output layer for disease segmentation
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
