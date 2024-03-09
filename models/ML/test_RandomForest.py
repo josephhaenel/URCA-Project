@@ -7,7 +7,7 @@ import numpy as np
 
 class TestRandomForest(unittest.TestCase):
     def setUp(self):
-        self.rf = RandomForest()  # Replace with the actual class name
+        self.rf = ImageRandomForestSegmenter() 
         self.output_dir = "test_output"
 
     def tearDown(self):
