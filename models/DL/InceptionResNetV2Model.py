@@ -213,5 +213,7 @@ class InceptionResNetV2Model:
 
         # Save the model and training history
         save_history_to_txt(history, output_dir)
+        
+        tf.keras.backend.clear_session()
 
         return history

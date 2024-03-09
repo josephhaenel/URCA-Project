@@ -193,6 +193,8 @@ class AlexNetModel:
         output_layer = self.model.layers[-1]
         print("Output layer type:", output_layer.__class__.__name__)
         print("Output layer config:", output_layer.get_config())
+        
+        tf.keras.backend.clear_session()
 
         return history
 

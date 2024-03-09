@@ -1,5 +1,8 @@
+# python DLrun.py /home/studio-lab-user/myNotebook/URCA-Project/Final-URCA-DATASET/highlight_tomato /home/studio-lab-user/myNotebook/URCA-Project/Final-URCA-DATASET/lowlight_tomato /home/studio-lab-user/myNotebook/URCA-Project/Final-URCA-DATASET/Rice_Leaves
+
 import os
 import sys
+import tensorflow as tf
 
 from models.DL.InceptionResNetV2Model import InceptionResNetV2Model
 from models.DL.AlexNetModel import AlexNetModel
@@ -27,6 +30,8 @@ def run_all_models(base_directories):
         
         infoPath = os.path.join('DL_outputs', str(number), 'info.txt')
         
+        tf.keras.backend.clear_session()
+        
         # try:
         #     AlexNet_learning_rate = 0.0001 # 0.00001, 0.0000001
         #     AlexNet_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
@@ -37,6 +42,8 @@ def run_all_models(base_directories):
         #     alexnet_history = alexnet_model.compile_and_train(epochs=30, batch_size=32, output_dir=alexnet_output_dir)
         # except Exception as e:
         #     print(f"Failed to run AlexNet model: {e}")
+        
+        tf.keras.backend.clear_session()
         
         try:
             InceptionResNetV2_learning_rate = 0.0001 # 0.001, 0.0001
@@ -49,6 +56,8 @@ def run_all_models(base_directories):
         except Exception as e:
             print(f"Failed to run InceptionResNetV2 model: {e}")
             
+        tf.keras.backend.clear_session()
+            
             
         # try:
         #     ResNet50_learning_rate = 0.0001 # 0.001, 0.0001
@@ -60,6 +69,8 @@ def run_all_models(base_directories):
         #     resnet50_history = resnet50_model.compile_and_train(epochs=100, batch_size=32, output_dir=resnet50_output_dir)
         # except Exception as e:
         #     print(f"Failed to run ResNet50 model: {e}")
+        
+        tf.keras.backend.clear_session()
         
         # with open(infoPath, "w") as f:
         #     # Write learning rate and validation split to info.txt file
