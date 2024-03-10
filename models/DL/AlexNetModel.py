@@ -17,6 +17,19 @@ from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
 from utils.CreateDirectory import _create_directory
 
+def iou_loss(y_true, y_pred):
+    # Intersection
+    intersection = tf.reduce_sum(y_true * y_pred)
+    # Union
+    total = tf.reduce_sum(y_true) + tf.reduce_sum(y_pred)
+    union = total - intersection
+    # Adding a smooth factor to prevent division by 0
+    smooth = 1e-6
+    # Returning the IoU based loss
+    iou = (intersection + smooth) / (union + smooth)
+    return 1 - iou  # subtracting from 1 because we want to minimize the loss
+
+
 def scheduler(epoch, lr):
     if epoch < 10:
         return lr
@@ -33,7 +46,8 @@ def dice_coefficient(y_true, y_pred):
 def combined_loss(y_true, y_pred):
     bce = tf.keras.losses.BinaryCrossentropy()(y_true, y_pred)
     dice_loss = 1 - dice_coefficient(y_true, y_pred)
-    return bce + dice_loss
+    iou = iou_loss(y_true, y_pred)
+    return bce + dice_loss + iou
 
 def preprocess_mask(mask_path, target_size):
     # Load the mask
@@ -170,7 +184,7 @@ class AlexNetModel:
 
         # Model compilation with binary segmentation in mind
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate),
-                        loss='binary_crossentropy',
+                        loss=combined_loss,
                         metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         lr_callback = LearningRateScheduler(scheduler)

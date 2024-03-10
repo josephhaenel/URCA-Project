@@ -27,6 +27,32 @@ def dice_loss(y_true, y_pred, smooth=1):
     dice = tf.reduce_mean((2. * intersection + smooth)/(union + smooth), axis=0)
     return 1 - dice
 
+def iou_loss(y_true, y_pred):
+    """
+    Intersection-over-union (IoU) loss.
+
+    Calculates the IoU score as 1 - iou_score.
+    IoU is also known as Jaccard index and is a measure of overlap between two
+    binary masks. It is calculated as:
+    
+        IoU = |A ∩ B| / |A ∪ B|
+
+    where A and B are the ground truth mask and the predicted mask, respectively.
+
+    Args:
+        y_true: The ground truth tensor.
+        y_pred: The predicted tensor.
+
+    Returns:
+        The scalar IoU loss.
+    """
+    def f(y_true, y_pred):
+        intersection = tf.reduce_sum(y_true * y_pred)
+        union = tf.reduce_sum(y_true) + tf.reduce_sum(y_pred) - intersection
+        return 1. - intersection / (union + tf.keras.backend.epsilon())
+
+    return tf.reduce_mean(f(y_true, y_pred))
+
 def step_decay(epoch, learning_rate):
     initial_lrate = learning_rate
     drop = 0.5
@@ -181,7 +207,7 @@ class InceptionResNetV2Model:
 
         # Model compilation
         self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
-                        loss=dice_loss,
+                        loss=iou_loss,
                         metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         # Fit the model
@@ -198,7 +224,7 @@ class InceptionResNetV2Model:
 
         # Recompile the model
         self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
-                        loss=dice_loss,
+                        loss=iou_loss,
                         metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         # Fit the model again

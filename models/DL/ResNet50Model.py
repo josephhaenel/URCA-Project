@@ -6,7 +6,6 @@ from keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, BatchNor
 from keras.applications.resnet50 import ResNet50, preprocess_input
 from keras.models import Model
 from keras.optimizers import Adam
-from keras.losses import BinaryCrossentropy
 from keras.preprocessing.image import load_img, img_to_array
 from keras.callbacks import LearningRateScheduler, EarlyStopping
 
@@ -38,6 +37,32 @@ def create_augmenter():
         horizontal_flip=True,
         fill_mode='nearest'
     )
+    
+def iou_loss(y_true, y_pred):
+    """
+    Intersection-over-union (IoU) loss.
+
+    Calculates the IoU score as 1 - iou_score.
+    IoU is also known as Jaccard index and is a measure of overlap between two
+    binary masks. It is calculated as:
+    
+        IoU = |A ∩ B| / |A ∪ B|
+
+    where A and B are the ground truth mask and the predicted mask, respectively.
+
+    Args:
+        y_true: The ground truth tensor.
+        y_pred: The predicted tensor.
+
+    Returns:
+        The scalar IoU loss.
+    """
+    def f(y_true, y_pred):
+        intersection = tf.reduce_sum(y_true * y_pred)
+        union = tf.reduce_sum(y_true) + tf.reduce_sum(y_pred) - intersection
+        return 1. - intersection / (union + tf.keras.backend.epsilon())
+
+    return tf.reduce_mean(f(y_true, y_pred))
 
 
 
@@ -196,7 +221,7 @@ class ResNet50Model:
 
         # Model compilation
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
-                        loss=BinaryCrossentropy(),
+                        loss=iou_loss,
                         metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
         # Model training

@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 from models.ML.MachineLearningUtils.PairImagesByFilename import pair_images_by_filename
 from models.ML.MachineLearningUtils.calculate_iou import calculate_iou
+import multiprocessing
 
 class ImageRandomForestSegmenter:
     """
@@ -108,10 +109,11 @@ class ImageRandomForestSegmenter:
         Returns:
         - RandomForestClassifier: The trained random forest classifier.
         """
+        num_cores = multiprocessing.cpu_count()
         # Apply the provided scaler to standardize the data
         combined_images_standardized = scaler.transform(combined_images.reshape(-1, combined_images.shape[-1]))
         # Initialize RandomForestClassifier with n_jobs=-1 to use all CPU cores
-        rf = RandomForestClassifier(random_state=42, n_jobs=-1)
+        rf = RandomForestClassifier(random_state=42, n_jobs=int((1/2) * num_cores))
         # Train the RandomForestClassifier using the disease masks as labels
         rf.fit(combined_images_standardized, disease_masks.flatten())
         return rf
