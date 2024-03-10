@@ -1,19 +1,20 @@
 import os
 import numpy as np
 import tensorflow as tf
-
-from keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Resizing, concatenate, BatchNormalization, SpatialDropout2D, LeakyReLU, GlobalAveragePooling2D, Reshape, Dense, multiply, concatenate, SeparableConv2D
-from keras.regularizers import l2
-from keras.models import Model
-from keras.preprocessing.image import load_img, img_to_array
-from keras.optimizers import Adam
-from keras.callbacks import EarlyStopping, LearningRateScheduler
-from keras.layers import ReLU, Conv2DTranspose
-
+from tensorflow.keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Resizing, concatenate, BatchNormalization, SpatialDropout2D, LeakyReLU, GlobalAveragePooling2D, Reshape, Dense, multiply, concatenate, SeparableConv2D
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.applications.inception_resnet_v2 import preprocess_input
+from tensorflow.keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
-
+from tensorflow.keras.regularizers import l2
 from utils.SaveHistoryToTxt import save_history_to_txt
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
+from tensorflow.keras.callbacks import EarlyStopping, LearningRateScheduler
+import gc
+
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
 from utils.CreateDirectory import _create_directory
 
@@ -75,7 +76,7 @@ class AlexNetModel:
         """
         return len([name for name in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, name))])
 
-    def load_images_and_masks(self, paired_image_paths, target_size=(256, 256)):
+    def load_images_and_masks(self, paired_image_paths, target_size=(227, 227)):
         combined_images = []
         disease_masks = []
         disease_types = [] 
@@ -94,7 +95,7 @@ class AlexNetModel:
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
 
     def _build_model(self) -> Model:
-        input_tensor = Input(shape=(None, None, 6))
+        input_tensor = Input(shape=(227, 227, 6))
 
         # Extract RGB and mask channels from the input
         processed_rgb = Lambda(lambda x: x[:, :, :, :3])(input_tensor)
@@ -125,20 +126,16 @@ class AlexNetModel:
         x = squeeze_excite_block(x)
 
         x = Conv2D(256, (3, 3), padding='same', kernel_regularizer=l2(0.01))(x)
-        x = ReLU()(x)
+        x = LeakyReLU(alpha=0.1)(x)
         x = SpatialDropout2D(0.5)(x)
         x = BatchNormalization()(x)
         x = MaxPooling2D((3, 3), strides=2)(x)
-        # Upsampling
-        x = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(x)
-        x = Conv2D(128, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
-        x = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(x)
-        x = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(x)
-        x = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(x)
-        x = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(x)
 
-        # Resize x to match the dimensions of processed_mask
-        x = Resizing(256, 256)(x) 
+        # Upsampling
+        x = UpSampling2D(size=(2, 2))(x)
+        x = Conv2D(128, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
+        x = UpSampling2D(size=(2, 2))(x)
+        x = Resizing(227, 227)(x)
 
         # Combine features with the mask
         combined = concatenate([x, processed_mask])
@@ -162,8 +159,8 @@ class AlexNetModel:
         train_data, val_data = train_test_split(paired_image_paths_with_labels, test_size=self.val_split, stratify=[item[3] for item in paired_image_paths_with_labels], random_state=42)
 
         # Load images and masks for training and validation
-        combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(train_data, target_size=(256, 256))
-        combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(val_data, target_size=(256, 256))
+        combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(train_data, target_size=(227, 227))
+        combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(val_data, target_size=(227, 227))
 
         # Initialize BinarySegmentationMetrics with validation data and disease types
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name = 'AlexNet', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
@@ -171,12 +168,12 @@ class AlexNetModel:
         # Model compilation with binary segmentation in mind
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate),
                         loss='binary_crossentropy',
-                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
+                        metrics=['accuracy'])
 
         lr_callback = LearningRateScheduler(scheduler)
 
         # EarlyStopping callback
-        es_callback = EarlyStopping(monitor='val_mean_io_u', patience=5)
+        es_callback = EarlyStopping(monitor='val_accuracy', patience=5)
 
         history = self.model.fit(
             combined_inputs_train, disease_labels_train,
@@ -193,6 +190,8 @@ class AlexNetModel:
         output_layer = self.model.layers[-1]
         print("Output layer type:", output_layer.__class__.__name__)
         print("Output layer config:", output_layer.get_config())
+        
+        tf.keras.backend.clear_session()
 
         return history
 

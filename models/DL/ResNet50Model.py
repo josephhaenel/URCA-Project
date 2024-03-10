@@ -1,22 +1,22 @@
 import os
 import numpy as np
 import tensorflow as tf
-
-from keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, BatchNormalization, Activation
-from keras.applications.resnet50 import ResNet50, preprocess_input
-from keras.models import Model
-from keras.optimizers import Adam
-from keras.losses import BinaryCrossentropy
-from keras.preprocessing.image import load_img, img_to_array
-from keras.callbacks import LearningRateScheduler, EarlyStopping
-
-from sklearn.model_selection import train_test_split
-
+from tensorflow.keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, BatchNormalization, Activation
+from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import BinaryCrossentropy
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from utils.SaveHistoryToTxt import save_history_to_txt
+from sklearn.model_selection import train_test_split
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
-from utils.CreateDirectory import _create_directory
+from tensorflow.keras.callbacks import LearningRateScheduler, EarlyStopping
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import gc
+
+
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
-from keras.preprocessing.image import ImageDataGenerator
+from utils.CreateDirectory import _create_directory
 
 
 def iou(y_true, y_pred):
@@ -28,19 +28,6 @@ def iou(y_true, y_pred):
         return x
     return tf.numpy_function(f, [y_true, y_pred], tf.float32)
 
-def create_augmenter():
-    return ImageDataGenerator(
-        rotation_range=10,
-        width_shift_range=0.1,
-        height_shift_range=0.1,
-        shear_range=0.1,
-        zoom_range=0.1,
-        horizontal_flip=True,
-        fill_mode='nearest'
-    )
-
-
-
 class ResNet50Model:
     def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], learning_rate: float, val_split: float, dataset_name: str) -> None:
         self.rgb_dirs = rgb_dirs
@@ -51,7 +38,7 @@ class ResNet50Model:
         self.dataset_name = dataset_name
         self.model = self._build_model()
 
-    def load_images_and_masks(self, paired_image_paths, target_size=(256, 256)):
+    def load_images_and_masks(self, paired_image_paths, target_size=(224, 224)):
         combined_images = []
         disease_masks = []
         disease_types = []
@@ -60,25 +47,29 @@ class ResNet50Model:
             if all(os.path.exists(p) and p.endswith('.png') for p in [rgb_path, leaf_path, disease_path]):
                 # Load RGB image and preprocess
                 rgb_image = img_to_array(load_img(rgb_path, target_size=target_size, color_mode='rgb')) / 255.0
-                
+
                 # Load leaf mask, preprocess, and expand dimensions if necessary
                 leaf_mask = img_to_array(load_img(leaf_path, target_size=target_size, color_mode='grayscale')) / 255.0
                 if leaf_mask.ndim == 2:
                     leaf_mask = np.expand_dims(leaf_mask, axis=-1)
 
-                # Combine RGB image and leaf mask along the channel axis
-                combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)
+                # Check if RGB and leaf mask have the same number of channels
+                if rgb_image.shape[-1] == leaf_mask.shape[-1]:
+                    # Combine RGB image and leaf mask
+                    combined_image = np.concatenate([rgb_image, leaf_mask], axis=-1)  # Combine along the channel axis
+                else:
+                    # Expand leaf mask to match RGB image's channel dimension
+                    expanded_leaf_mask = np.tile(leaf_mask, (1, 1, rgb_image.shape[-1]))
+                    # Combine RGB image and expanded leaf mask
+                    combined_image = np.concatenate([rgb_image, expanded_leaf_mask], axis=-1)
 
-
-                combined_images.append(combined_image)
-                
                 # Load and preprocess disease mask
                 disease_mask = img_to_array(load_img(disease_path, target_size=target_size, color_mode='grayscale'))
                 disease_mask = np.where(disease_mask > 127, 1, 0)
-                if disease_mask.ndim == 2:  # Check if disease_mask is 2D
-                    disease_mask = np.expand_dims(disease_mask, axis=-1)  # Add a single channel dimension to make it 3D
+                disease_mask = np.expand_dims(disease_mask, axis=-1)
 
                 # Append to lists
+                combined_images.append(combined_image)
                 disease_masks.append(disease_mask)
                 disease_types.append(disease_type)
             else:
@@ -90,7 +81,6 @@ class ResNet50Model:
 
         return np.array(combined_images), np.array(disease_masks), np.array(disease_types)
 
-
     def _build_model(self) -> Model:
         # Load pre-trained ResNet50 model without top layers
         base_model = ResNet50(weights='imagenet', include_top=False)
@@ -100,7 +90,7 @@ class ResNet50Model:
             layer.trainable = False
 
         # Create new input layer for 6-channel input
-        input_tensor = Input(shape=(256, 256, 6))
+        input_tensor = Input(shape=(224, 224, 6))
 
         # Use a Lambda layer to take only the first 3 channels (RGB) to feed into the ResNet50
         x = Lambda(lambda x: x[:, :, :, :3])(input_tensor)
@@ -119,7 +109,7 @@ class ResNet50Model:
         x = Activation('relu')(x)
         x = UpSampling2D(size=(2, 2))(x)
 
-        x = Resizing(256, 256)(x)
+        x = Resizing(224, 224)(x)
         disease_segmentation = Conv2D(1, (1, 1), activation='sigmoid', name='disease_segmentation')(x)
 
         
@@ -146,7 +136,7 @@ class ResNet50Model:
         lr_scheduler = LearningRateScheduler(lr_schedule)
 
         # Create EarlyStopping callback
-        early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=10)
+        early_stopping = EarlyStopping(monitor='val_accuracy', patience=10)
 
         # Load and preprocess data
         all_paired_image_paths = pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
@@ -176,42 +166,34 @@ class ResNet50Model:
 
         # Preparing training and validation datasets
         combined_inputs_train, disease_labels_train, train_disease_types = self.load_images_and_masks(
-            stratified_train_data, target_size=(256, 256))
+            stratified_train_data, target_size=(224, 224))
         combined_inputs_val, disease_labels_val, val_disease_types = self.load_images_and_masks(
-            stratified_val_data, target_size=(256, 256))
+            stratified_val_data, target_size=(224, 224))
 
         binary_segmentation_metrics = BinarySegmentationMetrics(validation_data=(combined_inputs_val, disease_labels_val), validation_disease_types=val_disease_types, model_name='ResNet50', learning_rate=self.learning_rate, val_split=self.val_split, dataset_name=self.dataset_name, output_dir=output_dir)
         
-        augmenter = create_augmenter()
-
-        def train_generator(data_generator, images, masks):
-            seed = 1  # Ensuring that image and mask undergo the same transformation
-            image_gen = data_generator.flow(images, batch_size=batch_size, seed=seed)
-            mask_gen = data_generator.flow(masks, batch_size=batch_size, seed=seed)
-            
-            while True:
-                yield next(image_gen), next(mask_gen)
-
-        train_gen = train_generator(augmenter, combined_inputs_train, disease_labels_train)
-
         # Model compilation
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
                         loss=BinaryCrossentropy(),
-                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
+                        metrics=['accuracy'])
 
         # Model training
         history = self.model.fit(
-            train_gen,
+            combined_inputs_train, 
+            disease_labels_train, 
             validation_data=(combined_inputs_val, disease_labels_val),
             epochs=epochs, 
             batch_size=batch_size,
             callbacks=[binary_segmentation_metrics, lr_scheduler, early_stopping]  # Add lr_scheduler and early_stopping to callbacks
             )
         
+        
         binary_segmentation_metrics.save_results_to_excel()
 
         # Save the model and training history
         save_history_to_txt(history, output_dir)
+        
+        tf.keras.backend.clear_session()
 
         return history
 
