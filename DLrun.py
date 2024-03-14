@@ -33,42 +33,39 @@ def run_all_models(base_directories):
         tf.keras.backend.clear_session()
         
         # try:
-        #     AlexNet_learning_rate = 0.0001 # 0.00001, 0.0000001
+        #     AlexNet_learning_rate = 0.01 # 0.00001, 0.0000001
         #     AlexNet_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
             
         #     # Run AlexNet Model
         #     alexnet_output_dir = os.path.join(base_output_dir, 'AlexNet')
         #     alexnet_model = AlexNetModel(base_rgb_dir, base_disease_dir, base_leaf_dir, AlexNet_learning_rate, AlexNet_val_split, last_part)
-        #     alexnet_history = alexnet_model.compile_and_train(epochs=30, batch_size=32, output_dir=alexnet_output_dir)
+        #     alexnet_history = alexnet_model.compile_and_train(epochs=100, batch_size=32, output_dir=alexnet_output_dir)
         # except Exception as e:
         #     print(f"Failed to run AlexNet model: {e}")
         
         tf.keras.backend.clear_session()
         
-        try:
-            InceptionResNetV2_learning_rate = 0.0001 # 0.001, 0.0001
-            InceptionResNetV2_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
+        # try:
+        #     InceptionResNetV2_learning_rate = 0.0001 # 0.001, 0.0001
+        #     InceptionResNetV2_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1
             
-            # Run Inception ResNet V2 Model
-            inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
-            inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, InceptionResNetV2_learning_rate, InceptionResNetV2_val_split, last_part)
-            inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=50, batch_size=32, output_dir=inception_resnet_v2_output_dir)
-        except Exception as e:
-            print(f"Failed to run InceptionResNetV2 model: {e}")
+        #     # Run Inception ResNet V2 Model
+        #     inception_resnet_v2_output_dir = os.path.join(base_output_dir, 'InceptionResNetV2')
+        #     inception_resnet_v2_model = InceptionResNetV2Model(base_rgb_dir, base_disease_dir, base_leaf_dir, InceptionResNetV2_learning_rate, InceptionResNetV2_val_split, last_part)
+        #     inception_resnet_v2_history = inception_resnet_v2_model.compile_and_train(epochs=100, batch_size=64, output_dir=inception_resnet_v2_output_dir)
+        # except Exception as e:
+        #     print(f"Failed to run InceptionResNetV2 model: {e}")
             
         tf.keras.backend.clear_session()
             
             
-        # try:
-        #     ResNet50_learning_rate = 0.0001 # 0.001, 0.0001
-        #     ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
-            
-        #     # Run ResNet50 Model
-        #     resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
-        #     resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, ResNet50_learning_rate, ResNet50_val_split, last_part)
-        #     resnet50_history = resnet50_model.compile_and_train(epochs=100, batch_size=32, output_dir=resnet50_output_dir)
-        # except Exception as e:
-        #     print(f"Failed to run ResNet50 model: {e}")
+        ResNet50_learning_rate = 0.001 # 0.001, 0.0001
+        ResNet50_val_split = 0.2 # 0.9, 0.7, 0.5, 0.3, 0.1   
+        
+        # Run ResNet50 Model
+        resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
+        resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, ResNet50_learning_rate, ResNet50_val_split, last_part)
+        resnet50_history = resnet50_model.compile_and_train(epochs=10, batch_size=32, output_dir=resnet50_output_dir)
         
         tf.keras.backend.clear_session()
         

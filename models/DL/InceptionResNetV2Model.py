@@ -2,10 +2,11 @@ import os
 import numpy as np
 import tensorflow as tf
 import math
-from keras.callbacks import LearningRateScheduler
+from keras.callbacks import LearningRateScheduler, ModelCheckpoint
 from keras.layers import Lambda, Input, Conv2D, UpSampling2D, Resizing, concatenate, Multiply
 from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
 from keras.models import Model
+from keras.optimizers import Adam
 from keras.preprocessing.image import load_img, img_to_array
 from utils.BinarySegmentationMetrics import BinarySegmentationMetrics
 from sklearn.model_selection import train_test_split
@@ -13,12 +14,69 @@ from utils.SaveHistoryToTxt import save_history_to_txt
 from keras.callbacks import EarlyStopping
 from keras import regularizers
 from keras.preprocessing.image import ImageDataGenerator
+from keras.utils import plot_model
+import matplotlib.pyplot as plt
+import cv2
 
 from models.DL.DeepLearningUtils.ImagePreprocessing import pair_images_by_filename
 from utils.CreateDirectory import _create_directory
+from models.DL.DeepLearningUtils.CyclicLRChanger import CyclicLR
 
 # Suppress TensorFlow warnings for a cleaner output
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+
+def refine_mask_with_morphology(mask, kernel_size=3, iterations=1):
+    """
+    Refine the segmentation mask using morphological operations.
+
+    Args:
+    mask (numpy.ndarray): The predicted segmentation mask.
+    kernel_size (int): Size of the morphological kernel.
+    iterations (int): Number of times the operation is applied.
+
+    Returns:
+    numpy.ndarray: Refined segmentation mask.
+    """
+
+    # Convert the mask to uint8
+    mask = (mask * 255).astype(np.uint8)
+
+    # Define the kernel for the morphological operations
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+
+    # Apply morphological opening (erosion followed by dilation)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=iterations)
+
+    # Apply morphological closing (dilation followed by erosion)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=iterations)
+
+    return mask / 255  # Normalize the mask back to the range [0, 1]
+
+def save_predictions(model, inputs, labels, class_names, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for idx, (input_img, true_label) in enumerate(zip(inputs, labels)):
+        pred_label = model.predict(np.expand_dims(input_img, axis=0))[0]
+        pred_label_binary = (pred_label > 0.5).astype(np.float32).squeeze()
+
+        # Apply morphology to refine the mask
+        refined_pred_label = refine_mask_with_morphology(pred_label_binary)
+
+        fig, axs = plt.subplots(1, 4, figsize=(20, 5))
+        axs[0].imshow(input_img[..., :3])
+        axs[0].set_title("Input Image")
+
+        axs[1].imshow(true_label.squeeze(), cmap='gray')
+        axs[1].set_title("True Label")
+
+        axs[2].imshow(pred_label_binary, cmap='gray')
+        axs[2].set_title("Predicted Binary Label")
+
+        axs[3].imshow(refined_pred_label, cmap='gray')
+        axs[3].set_title("Refined Prediction with Morphology")
+
+        plt.savefig(os.path.join(output_dir, f"sample_{idx}.png"))
+        plt.close(fig)
 
 def dice_loss(y_true, y_pred, smooth=1):
     y_true = tf.cast(y_true, tf.float32)  # Add this line
@@ -106,7 +164,7 @@ class InceptionResNetV2Model:
 
     def _build_model(self):
         # Input tensor for RGB images and leaf segmentation mask
-        input_tensor = Input(shape=(None, None, 4))
+        input_tensor = Input(shape=(256, 256, 4))
 
         # Split RGB and mask
         processed_rgb = Lambda(lambda x: x[..., :3])(input_tensor)
@@ -126,7 +184,7 @@ class InceptionResNetV2Model:
         combined_features = concatenate([rgb_features, mask_conv_resized])
 
         # Attention Mechanism
-        attention_map = Conv2D(1, (1, 1), activation='sigmoid')(combined_features)
+        attention_map = Conv2D(1, (1, 1), activation='sigmoid')(mask_conv_resized)
         attention_features = Multiply()([combined_features, attention_map])
 
         x = Conv2D(1024, (3, 3), activation='relu', padding='same', kernel_regularizer=regularizers.l2(0.01))(attention_features)
@@ -150,12 +208,12 @@ class InceptionResNetV2Model:
         _create_directory(output_dir)
         plots_dir = os.path.join(output_dir, 'plots')
         _create_directory(plots_dir)
+        model_checkpoint_dir = os.path.join(output_dir, 'best_model.h5')
+        os.makedirs(os.path.dirname(model_checkpoint_dir), exist_ok=True)
 
         # Create EarlyStopping callback
-        early_stopping = EarlyStopping(monitor='val_mean_io_u', patience=25)
-
-        # Create LearningRateScheduler callback
-        lrate_scheduler = LearningRateScheduler(step_decay)
+        early_stopping = EarlyStopping(monitor='val_loss', patience=25)
+        model_checkpoint = ModelCheckpoint(model_checkpoint_dir, monitor='val_loss', save_best_only=True, verbose=1)
 
         # Load and preprocess data
         all_paired_image_paths = pair_images_by_filename(self.rgb_dirs, self.disease_segmented_dirs, self.leaf_segmented_dirs)
@@ -204,9 +262,11 @@ class InceptionResNetV2Model:
         mask_generator = mask_datagen.flow(disease_labels_train, batch_size=batch_size, seed=seed)
 
         train_generator = zip(image_generator, mask_generator)
+        
+        clr = CyclicLR(base_lr=0.001, max_lr=0.006, step_size=2000., mode='triangular')
 
         # Model compilation
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
+        self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
                         loss=iou_loss,
                         metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
 
@@ -215,27 +275,32 @@ class InceptionResNetV2Model:
             train_generator,
             steps_per_epoch=len(combined_inputs_train) // batch_size,
             epochs=int(epochs),
-            callbacks=[binary_segmentation_metrics, early_stopping, lrate_scheduler]  
+            callbacks=[binary_segmentation_metrics, early_stopping, clr, model_checkpoint]  
+        )
+        
+        best_model = tf.keras.models.load_model(model_checkpoint_dir)
+        
+        best_model.compile(optimizer=Adam(learning_rate=self.learning_rate), 
+                loss=iou_loss,
+                metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
+        
+        # Fit the model
+        history = best_model.fit(
+            train_generator,
+            steps_per_epoch=len(combined_inputs_train) // batch_size,
+            epochs=int(100),
+            callbacks=[binary_segmentation_metrics, early_stopping, clr, model_checkpoint]  
         )
 
-        # Unfreeze all layers
-        for layer in self.model.layers:
-            layer.trainable = True
 
-        # Recompile the model
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), 
-                        loss=iou_loss,
-                        metrics=['accuracy', tf.keras.metrics.MeanIoU(num_classes=2)])
-
-        # Fit the model again
-        history = self.model.fit(
-            train_generator, 
-            validation_data=(combined_inputs_val, disease_labels_val),
-            epochs=int(epochs), 
-            batch_size=batch_size,
-            callbacks=[binary_segmentation_metrics, early_stopping, lrate_scheduler]  
-            )
         binary_segmentation_metrics.save_results_to_excel()
+        
+        os.makedirs(os.path.join(output_dir, 'predictions'), exist_ok=True)
+
+        
+        save_predictions(best_model, combined_inputs_val, disease_labels_val, val_disease_types, os.path.join(output_dir, 'predictions'))
+        
+        plot_model(best_model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
 
         # Save the model and training history
         save_history_to_txt(history, output_dir)

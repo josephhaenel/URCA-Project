@@ -19,6 +19,9 @@ class BinarySegmentationMetrics(Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         predictions = self.model.predict(self.validation_data[0])
+        if isinstance(predictions, list):
+            predictions = np.concatenate(predictions, axis=-1)
+        binary_predictions = (predictions > 0.5).astype(int)
         binary_predictions = (predictions > 0.5).astype(int)
         unique_diseases = set(self.validation_disease_types)
 
