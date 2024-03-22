@@ -42,7 +42,7 @@ def create_augmenter():
         height_shift_range=0.1,
         shear_range=0.1,
         zoom_range=0.1,
-        horizontal_flip=True,
+        horizontal_flip=False,
         fill_mode='nearest'
     )
     
@@ -72,14 +72,20 @@ def iou_loss(y_true, y_pred):
 
     return tf.reduce_mean(f(y_true, y_pred))
 
-def calculate_num_disease_classes(rgb_dirs: list[str]) -> int:
-    disease_classes = set()
-    for directory in rgb_dirs:
-        if os.path.isdir(directory):
-            # Assuming that each directory represents a unique disease class
-            disease_classes.update(next(os.walk(directory))[1])
-    return len(disease_classes)
+def calculate_num_disease_classes(rgb_dir: str) -> int:
+    # Ensure the provided directory is valid
+    if not os.path.isdir(rgb_dir):
+        print(f"The directory {rgb_dir} is not valid.")
+        return 0
 
+    # List the contents of the directory
+    contents = os.listdir(rgb_dir)
+
+    # Count the directories (which represent disease classes)
+    disease_classes = [item for item in contents if os.path.isdir(os.path.join(rgb_dir, item))]
+    print('Disease classes found:', disease_classes)
+
+    return len(disease_classes)
 
 class ResNet50Model:
     def __init__(self, rgb_dirs: list[str], disease_segmented_dirs: list[str], leaf_segmented_dirs: list[str], learning_rate: float, val_split: float, dataset_name: str) -> None:
@@ -191,15 +197,22 @@ class ResNet50Model:
         results_df.to_csv(os.path.join(output_dir, 'predictions.csv'), index=False)
 
         # Save the model
-        self.model.save(os.path.join(output_dir, 'model.h5'))
+        self.model.save(os.path.join(output_dir, 'model.keras'))
 
     def _build_model(self) -> Model:
         # Load pre-trained ResNet50 model without top layers
         base_model = ResNet50(weights='imagenet', include_top=False)
+        
+        for i, layer in enumerate(base_model.layers):
+            print(i, layer.name, layer.trainable)
+
 
         # Freeze pre-trained layers
         for layer in base_model.layers:
             layer.trainable = False
+            
+        for layer in base_model.layers[-5:]:
+            layer.trainable = True
 
         # Create new input layer for 6-channel input
         input_tensor = Input(shape=(256, 256, 4))
@@ -290,28 +303,33 @@ class ResNet50Model:
         
         augmenter = create_augmenter()
         
-        def train_generator(data_generator, images, masks, labels):
+        def train_generator(data_generator, images, masks, labels, batch_size):
             seed = 1  # Ensuring that image and mask undergo the same transformation
             image_gen = data_generator.flow(images, batch_size=batch_size, seed=seed)
             mask_gen = data_generator.flow(masks, batch_size=batch_size, seed=seed)
-
             original_labels = labels.copy()  # Save a copy of the original labels
 
             while True:
                 image_batch = next(image_gen)
                 mask_batch = next(mask_gen)
-                # Get the corresponding labels for the batch
                 label_batch = labels[:batch_size]
-                # Remove the used labels
                 labels = labels[batch_size:]
-                # If the labels array is empty, reset it to the original labels
-                if len(labels) == 0:
+
+                # Check if the label batch is empty or smaller than expected
+                if label_batch.shape[0] == 0 or label_batch.shape[0] < batch_size:
+                    # Reset the labels for the next epoch
                     labels = original_labels.copy()
+                    # Skip yielding this batch
+                    continue
+
+                if len(labels) == 0:
+                    # Reset the labels for the next epoch
+                    labels = original_labels.copy()
+
                 yield image_batch, {'disease_segmentation': mask_batch, 'disease_classification': label_batch}
 
-
-        train_gen = train_generator(augmenter, combined_inputs_train, disease_labels_train, train_disease_types)
-        val_gen = train_generator(augmenter, combined_inputs_val, disease_labels_val, val_disease_types)
+        train_gen = train_generator(augmenter, combined_inputs_train, disease_labels_train, train_disease_types, batch_size)
+        val_gen = train_generator(augmenter, combined_inputs_val, disease_labels_val, val_disease_types, batch_size)
 
         # Model compilation
         self.model.compile(optimizer=Adam(learning_rate=self.learning_rate), 

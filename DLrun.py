@@ -65,7 +65,7 @@ def run_all_models(base_directories):
         # Run ResNet50 Model
         resnet50_output_dir = os.path.join(base_output_dir, 'ResNet50')
         resnet50_model = ResNet50Model(base_rgb_dir, base_disease_dir, base_leaf_dir, ResNet50_learning_rate, ResNet50_val_split, last_part)
-        resnet50_history = resnet50_model.compile_and_train(epochs=10, batch_size=32, output_dir=resnet50_output_dir)
+        resnet50_history = resnet50_model.compile_and_train(epochs=100, batch_size=32, output_dir=resnet50_output_dir)
         
         tf.keras.backend.clear_session()
         
